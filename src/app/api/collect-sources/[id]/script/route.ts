@@ -36,16 +36,42 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 ${fieldMap}
   ];
 
+  var UTM_KEY = "xflow_utm";
+
+  function saveUTMIfPresent() {
+    var params = new URLSearchParams(window.location.search);
+    var source = params.get("utm_source");
+    if (!source) return;
+    try {
+      sessionStorage.setItem(UTM_KEY, JSON.stringify({
+        utmSource:   source,
+        utmMedium:   params.get("utm_medium")   || "",
+        utmCampaign: params.get("utm_campaign") || "",
+        utmTerm:     params.get("utm_term")     || "",
+        utmContent:  params.get("utm_content")  || "",
+      }));
+    } catch(e) {}
+  }
+
   function getUTMParams() {
     var params = new URLSearchParams(window.location.search);
-    return {
-      utmSource: params.get("utm_source") || "",
-      utmMedium: params.get("utm_medium") || "",
-      utmCampaign: params.get("utm_campaign") || "",
-      utmTerm: params.get("utm_term") || "",
-      utmContent: params.get("utm_content") || "",
-    };
+    if (params.get("utm_source")) {
+      return {
+        utmSource:   params.get("utm_source")   || "",
+        utmMedium:   params.get("utm_medium")   || "",
+        utmCampaign: params.get("utm_campaign") || "",
+        utmTerm:     params.get("utm_term")     || "",
+        utmContent:  params.get("utm_content")  || "",
+      };
+    }
+    try {
+      var stored = sessionStorage.getItem(UTM_KEY);
+      if (stored) return JSON.parse(stored);
+    } catch(e) {}
+    return { utmSource: "", utmMedium: "", utmCampaign: "", utmTerm: "", utmContent: "" };
   }
+
+  saveUTMIfPresent();
 
   function getFieldMeta() {
     var groups = document.querySelectorAll(".form-group");

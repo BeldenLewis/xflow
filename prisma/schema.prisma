@@ -30,12 +30,14 @@ model Workspace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members      WorkspaceMember[]
-  projects     Project[]
-  utmLinks     UTMLink[]
-  utmPresets   UTMPreset[]
-  utmTemplates UTMTemplate[]
-  invitations  WorkspaceInvitation[]
+  members        WorkspaceMember[]
+  projects       Project[]
+  utmLinks       UTMLink[]
+  utmPresets     UTMPreset[]
+  utmTemplates   UTMTemplate[]
+  invitations    WorkspaceInvitation[]
+  collectSources CollectSource[]
+  collectRecords CollectRecord[]
 }
 
 model WorkspaceMember {
@@ -92,8 +94,10 @@ model Project {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  utmLinks  UTMLink[]
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  utmLinks       UTMLink[]
+  collectSources CollectSource[]
+  collectRecords CollectRecord[]
 }
 
 model UTMPreset {
@@ -122,6 +126,64 @@ model UTMTemplate {
   createdAt   DateTime  @default(now())
 
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model CollectSource {
+  id             String   @id @default(cuid())
+  projectId      String
+  workspaceId    String
+  name           String
+  description    String?
+  apiKey         String   @unique @default(cuid())
+  siteUrl        String?
+  successTrigger String   @default("정상적으로 접수되었습니다")
+  redirectUrl    String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  fieldMappings FieldMapping[]
+  records       CollectRecord[]
+}
+
+model FieldMapping {
+  id         String   @id @default(cuid())
+  sourceId   String
+  index      Int
+  key        String
+  label      String
+  type       String   @default("text") // text | select | checkbox | radio
+  isRequired Boolean  @default(false)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  source CollectSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, index])
+  @@unique([sourceId, key])
+}
+
+model CollectRecord {
+  id          String   @id @default(cuid())
+  sourceId    String
+  projectId   String
+  workspaceId String
+  data        Json
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmTerm     String?
+  utmContent  String?
+  referrer    String?
+  userAgent   String?
+  ip          String?
+  createdAt   DateTime @default(now())
+
+  source    CollectSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  project   Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 model UTMLink {

@@ -123,49 +123,42 @@ ${fieldMap}
   }
 
   var triggered = false;
+  var pendingData = null;
 
-  function checkAndSend() {
+  // 제출/확인 버튼 클릭 시점에 미리 데이터 스냅샷 (폼 초기화 전)
+  document.addEventListener("click", function(e) {
     if (triggered) return;
-    // 새로 추가된 노드 외에, 이미 DOM에 있던 모달이 class 변경으로 표시되는 경우도 잡기
-    var modals = document.querySelectorAll('.modal-dialog, .bootbox, .bootbox-alert, .alert, .show, .modal.in');
-    for (var k = 0; k < modals.length; k++) {
-      var mText = modals[k].innerText || modals[k].textContent || "";
-      if (mText.indexOf(SUCCESS_TRIGGER) !== -1) {
-        triggered = true;
-        sendData(collectData());
-        if (REDIRECT_URL) {
-          setTimeout(function() { window.location.href = REDIRECT_URL; }, 1000);
-        }
-        return;
-      }
+    var target = e.target;
+    var btn = target.closest
+      ? target.closest("button, input[type='submit'], a")
+      : null;
+    if (!btn) return;
+    var text = (btn.innerText || btn.value || "").trim();
+    var isSubmit = btn.type === "submit" || text === "확인" || text === "OK"
+      || text === "접수" || text === "제출" || text === "신청";
+    if (isSubmit) {
+      pendingData = collectData();
+    }
+  }, true);
+
+  function fire() {
+    if (triggered) return;
+    triggered = true;
+    sendData(pendingData || collectData());
+    if (REDIRECT_URL) {
+      setTimeout(function() { window.location.href = REDIRECT_URL; }, 1000);
     }
   }
 
-  var observer = new MutationObserver(function(mutations) {
+  var observer = new MutationObserver(function() {
     if (triggered) return;
-    for (var i = 0; i < mutations.length; i++) {
-      // 새로 추가된 노드에서 직접 확인
-      var added = mutations[i].addedNodes;
-      for (var j = 0; j < added.length; j++) {
-        var node = added[j];
-        if (node.nodeType === 1) {
-          var text = node.textContent || "";
-          if (text.indexOf(SUCCESS_TRIGGER) !== -1) {
-            triggered = true;
-            sendData(collectData());
-            if (REDIRECT_URL) {
-              setTimeout(function() { window.location.href = REDIRECT_URL; }, 1000);
-            }
-            return;
-          }
-        }
-      }
+    var bodyText = document.body.innerText || document.body.textContent || "";
+    if (bodyText.indexOf(SUCCESS_TRIGGER) !== -1) {
+      fire();
     }
-    // 속성/텍스트 변경으로 모달이 표시된 경우
-    checkAndSend();
   });
 
-  observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
 })();`;
 
   return NextResponse.json({ script });

@@ -127,7 +127,7 @@ ${fieldMap}
   function checkAndSend() {
     if (triggered) return;
     // 새로 추가된 노드 외에, 이미 DOM에 있던 모달이 class 변경으로 표시되는 경우도 잡기
-    var modals = document.querySelectorAll('.modal-dialog, .bootbox, .bootbox-alert, .alert, .modal.show, .modal.in');
+    var modals = document.querySelectorAll('.modal-dialog, .bootbox, .bootbox-alert, .alert, .show, .modal.in');
     for (var k = 0; k < modals.length; k++) {
       var mText = modals[k].innerText || modals[k].textContent || "";
       if (mText.indexOf(SUCCESS_TRIGGER) !== -1) {

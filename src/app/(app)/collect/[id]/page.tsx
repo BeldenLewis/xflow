@@ -287,9 +287,9 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-8 space-y-6">
       {/* 헤더 */}
-      <div className="mb-6">
+      <div>
         <Link href="/collect" className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3">
           <ArrowLeft className="w-3.5 h-3.5" />데이터 수집 목록
         </Link>
@@ -299,7 +299,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
               <Database className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-xl font-semibold">{source.name}</h1>
+              <h1 className="text-2xl font-semibold">{source.name}</h1>
               <div className="flex items-center gap-3 mt-0.5">
                 {source.description && <p className="text-sm text-muted-foreground">{source.description}</p>}
                 {source.siteUrl && (
@@ -327,7 +327,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
       </div>
 
       {/* 탭 */}
-      <div className="flex gap-1 mb-6 border-b border-border">
+      <div className="flex gap-1 border-b border-border">
         {TABS.map(({ id: tabId, label, icon: Icon }) => (
           <button key={tabId} onClick={() => setTab(tabId)}
             className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${

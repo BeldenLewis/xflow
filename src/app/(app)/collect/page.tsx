@@ -102,11 +102,11 @@ export default function CollectPage() {
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-8 space-y-6">
+      <div className="flex items-end justify-between">
         <div>
-          <h1 className="text-xl font-semibold">데이터 수집</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{currentProject.name} · 외부 사이트 폼 데이터 수집</p>
+          <h1 className="text-2xl font-semibold">데이터 수집</h1>
+          <p className="text-sm text-muted-foreground mt-1.5">{currentProject.name} · 외부 사이트 폼 데이터 수집</p>
         </div>
         <motion.button
           whileTap={{ scale: 0.95 }}
@@ -125,7 +125,7 @@ export default function CollectPage() {
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
-            className="mb-4 p-5 rounded-2xl border border-violet-400/30 bg-violet-500/5"
+            className="p-5 rounded-2xl border border-violet-400/30 bg-violet-500/5"
           >
             <h3 className="text-sm font-semibold mb-4">새 수집 소스</h3>
             <div className="space-y-3">

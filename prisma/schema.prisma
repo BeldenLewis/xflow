@@ -1,0 +1,116 @@
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  avatarUrl String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships WorkspaceMember[]
+  utmLinks    UTMLink[]
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members      WorkspaceMember[]
+  projects     Project[]
+  utmLinks     UTMLink[]
+  utmPresets   UTMPreset[]
+  utmTemplates UTMTemplate[]
+}
+
+model WorkspaceMember {
+  id          String   @id @default(cuid())
+  role        Role     @default(MEMBER)
+  userId      String
+  workspaceId String
+  joinedAt    DateTime @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  workspaceId String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  utmLinks  UTMLink[]
+}
+
+model UTMPreset {
+  id          String    @id @default(cuid())
+  workspaceId String
+  field       String    // "source" | "medium" | "term" | "content"
+  value       String
+  label       String?   // 기본 모드 드롭다운에 표시될 이름 (예: "구글" → value: "google")
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, field, value])
+}
+
+model UTMTemplate {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String
+  source      String
+  medium      String
+  campaign    String?
+  term        String?
+  content     String?
+  createdAt   DateTime  @default(now())
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model UTMLink {
+  id          String   @id @default(cuid())
+  workspaceId String
+  projectId   String?
+  createdById String
+  name        String?
+  url         String
+  utmSource   String
+  utmMedium   String
+  utmCampaign String
+  utmTerm     String?
+  utmContent  String?
+  fullUrl     String
+  shortUrl    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+}

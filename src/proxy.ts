@@ -27,6 +27,11 @@ export async function proxy(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
 
+  // /api/collect는 API key 인증을 사용하므로 미들웨어 통과
+  if (request.nextUrl.pathname.startsWith("/api/collect")) {
+    return NextResponse.next();
+  }
+
   const publicPages = ["/", "/signup", "/reset-password"];
   const isPublicPage = publicPages.includes(request.nextUrl.pathname);
 

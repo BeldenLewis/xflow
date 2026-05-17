@@ -16,8 +16,11 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships WorkspaceMember[]
-  utmLinks    UTMLink[]
+  memberships         WorkspaceMember[]
+  utmLinks            UTMLink[]
+  notifications       Notification[]
+  sentInvitations     WorkspaceInvitation[] @relation("InvitedBy")
+  receivedInvitations WorkspaceInvitation[] @relation("InvitedUser")
 }
 
 model Workspace {
@@ -32,6 +35,7 @@ model Workspace {
   utmLinks     UTMLink[]
   utmPresets   UTMPreset[]
   utmTemplates UTMTemplate[]
+  invitations  WorkspaceInvitation[]
 }
 
 model WorkspaceMember {
@@ -51,6 +55,33 @@ enum Role {
   OWNER
   ADMIN
   MEMBER
+}
+
+model WorkspaceInvitation {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  invitedUserId String
+  invitedById   String
+  role          Role     @default(MEMBER)
+  status        String   @default("PENDING") // PENDING | ACCEPTED | DECLINED
+  createdAt     DateTime @default(now())
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedUser User      @relation("InvitedUser", fields: [invitedUserId], references: [id], onDelete: Cascade)
+  invitedBy   User      @relation("InvitedBy", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, invitedUserId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String   // "WORKSPACE_INVITE" | "ROLE_CHANGED" | "MEMBER_REMOVED"
+  data      Json
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Project {

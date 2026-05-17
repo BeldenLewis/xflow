@@ -218,10 +218,9 @@ export function WorkspaceSettingsModal({ open, onClose }: Props) {
         body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "초대 실패"); return; }
+      if (!res.ok) { toast.error(data.error ?? "초대하지 못했어요. 다시 시도해주세요"); return; }
       setInviteEmail("");
-      fetchMembers();
-      toast.success("멤버가 추가됐어요");
+      toast.success("초대를 보냈어요. 상대방이 수락하면 멤버로 추가돼요");
     } finally { setIsInviting(false); }
   };
 

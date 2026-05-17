@@ -13,6 +13,7 @@ import { useWorkspace } from "@/contexts/workspace";
 import { toast } from "sonner";
 import { WorkspaceSettingsModal } from "@/components/workspace/workspace-settings-modal";
 import { ProfileSettingsModal } from "@/components/user/profile-settings-modal";
+import { NotificationPanel } from "@/components/notifications/notification-panel";
 
 const navItems = [
   { href: "/dashboard", icon: LayoutDashboard, label: "대시보드" },
@@ -285,6 +286,7 @@ export function Sidebar() {
       <div className="mx-3 h-px bg-border/60 mb-2" />
 
       {/* 네비게이션 */}
+
       <nav className="flex-1 px-3 py-1 space-y-0.5 overflow-y-auto">
         {navItems.map(({ href, icon: Icon, label, soon }) => {
           const isActive = pathname === href || pathname.startsWith(href + "/");
@@ -301,6 +303,11 @@ export function Sidebar() {
           );
         })}
       </nav>
+
+      {/* 알림 */}
+      <div className="px-3 pb-2">
+        <NotificationPanel />
+      </div>
 
       {/* 하단 프로필 */}
       <div className="px-3 pb-3 pt-2" ref={profileRef}>

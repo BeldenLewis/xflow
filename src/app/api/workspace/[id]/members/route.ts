@@ -27,7 +27,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   return NextResponse.json({ members });
 }
 
-// 멤버 초대 (이메일로)
+// 멤버 초대 (이메일로 → 초대 대기)
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -42,27 +42,49 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { email, role = "MEMBER" } = await request.json();
   if (!email) return NextResponse.json({ error: "이메일을 입력해주세요" }, { status: 400 });
 
-  // Supabase에서 해당 이메일 유저 찾기 (서비스 롤 필요)
-  const adminClient = await createClient();
-  const existingUser = await prisma.user.findUnique({ where: { email } });
-
-  if (!existingUser) {
+  const invitedUser = await prisma.user.findUnique({ where: { email } });
+  if (!invitedUser) {
     return NextResponse.json({ error: "해당 이메일로 가입된 계정이 없어요. 먼저 가입 후 초대해주세요." }, { status: 404 });
   }
 
   const alreadyMember = await prisma.workspaceMember.findUnique({
-    where: { userId_workspaceId: { userId: existingUser.id, workspaceId: id } },
+    where: { userId_workspaceId: { userId: invitedUser.id, workspaceId: id } },
   });
   if (alreadyMember) {
     return NextResponse.json({ error: "이미 워크스페이스 멤버예요" }, { status: 409 });
   }
 
-  const newMember = await prisma.workspaceMember.create({
-    data: { id: crypto.randomUUID(), userId: existingUser.id, workspaceId: id, role },
-    include: { user: { select: { id: true, name: true, email: true, avatarUrl: true } } },
+  const existingInvitation = await prisma.workspaceInvitation.findUnique({
+    where: { workspaceId_invitedUserId: { workspaceId: id, invitedUserId: invitedUser.id } },
+  });
+  if (existingInvitation?.status === "PENDING") {
+    return NextResponse.json({ error: "이미 초대가 전송됐어요" }, { status: 409 });
+  }
+
+  const workspace = await prisma.workspace.findUnique({ where: { id }, select: { name: true } });
+  const inviter = await prisma.user.findUnique({ where: { id: user.id }, select: { name: true, email: true } });
+
+  const invitation = await prisma.workspaceInvitation.upsert({
+    where: { workspaceId_invitedUserId: { workspaceId: id, invitedUserId: invitedUser.id } },
+    update: { status: "PENDING", role, invitedById: user.id },
+    create: { workspaceId: id, invitedUserId: invitedUser.id, invitedById: user.id, role },
   });
 
-  return NextResponse.json({ member: newMember });
+  await prisma.notification.create({
+    data: {
+      userId: invitedUser.id,
+      type: "WORKSPACE_INVITE",
+      data: {
+        invitationId: invitation.id,
+        workspaceId: id,
+        workspaceName: workspace?.name ?? "",
+        inviterName: inviter?.name || inviter?.email || "",
+        role,
+      },
+    },
+  });
+
+  return NextResponse.json({ ok: true });
 }
 
 // 역할 변경
@@ -90,10 +112,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "소유자의 역할은 변경할 수 없어요" }, { status: 403 });
   }
 
+  const workspace = await prisma.workspace.findUnique({ where: { id }, select: { name: true } });
+
   const updated = await prisma.workspaceMember.update({
     where: { id: memberId },
     data: { role },
     include: { user: { select: { id: true, name: true, email: true, avatarUrl: true } } },
+  });
+
+  await prisma.notification.create({
+    data: {
+      userId: target.userId,
+      type: "ROLE_CHANGED",
+      data: { workspaceId: id, workspaceName: workspace?.name ?? "", role },
+    },
   });
 
   return NextResponse.json({ member: updated });
@@ -122,6 +154,17 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     return NextResponse.json({ error: "편집자는 다른 편집자를 제거할 수 없어요" }, { status: 403 });
   }
 
+  const workspace = await prisma.workspace.findUnique({ where: { id }, select: { name: true } });
+
   await prisma.workspaceMember.delete({ where: { id: memberId } });
+
+  await prisma.notification.create({
+    data: {
+      userId: target.userId,
+      type: "MEMBER_REMOVED",
+      data: { workspaceId: id, workspaceName: workspace?.name ?? "" },
+    },
+  });
+
   return NextResponse.json({ ok: true });
 }

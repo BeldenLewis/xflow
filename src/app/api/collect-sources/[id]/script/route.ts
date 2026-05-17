@@ -80,6 +80,7 @@ ${fieldMap}
     var utm = getUTMParams();
     fetch(COLLECT_URL, {
       method: "POST",
+      keepalive: true,
       headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
       body: JSON.stringify({
         data: formData,

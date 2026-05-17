@@ -138,9 +138,10 @@ model CollectSource {
   siteUrl        String?
   successTrigger String   @default("정상적으로 접수되었습니다")
   redirectUrl    String?
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  isActive         Boolean  @default(true)
+  discoveredFields Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)

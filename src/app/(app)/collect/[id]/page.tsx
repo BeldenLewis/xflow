@@ -6,7 +6,7 @@ import { motion, AnimatePresence, Reorder } from "framer-motion";
 import {
   ArrowLeft, Database, Globe, Copy, Check, Plus, Trash2,
   GripVertical, Code2, Table2, Settings2, Loader2, RefreshCw,
-  ToggleLeft, ToggleRight, ExternalLink,
+  ToggleLeft, ToggleRight, ExternalLink, Sparkles, ClipboardPaste,
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -21,6 +21,12 @@ interface FieldMapping {
   sortOrder: number;
 }
 
+interface DiscoveredField {
+  index: number;
+  label: string;
+  type: string;
+}
+
 interface CollectSource {
   id: string;
   name: string;
@@ -31,6 +37,7 @@ interface CollectSource {
   redirectUrl: string | null;
   isActive: boolean;
   fieldMappings: FieldMapping[];
+  discoveredFields: DiscoveredField[] | null;
   _count: { records: number };
 }
 
@@ -40,8 +47,6 @@ interface CollectRecord {
   utmSource: string | null;
   utmMedium: string | null;
   utmCampaign: string | null;
-  utmTerm: string | null;
-  utmContent: string | null;
   referrer: string | null;
   createdAt: string;
 }
@@ -54,7 +59,7 @@ const TABS = [
 
 type Tab = typeof TABS[number]["id"];
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = () => {
     navigator.clipboard.writeText(text);
@@ -62,7 +67,7 @@ function CopyButton({ text }: { text: string }) {
     setTimeout(() => setCopied(false), 2000);
   };
   return (
-    <button onClick={handleCopy} className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground">
+    <button onClick={handleCopy} className={className ?? "p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground"}>
       {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
     </button>
   );
@@ -72,28 +77,35 @@ function timeStr(dateStr: string) {
   return new Date(dateStr).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+function toKey(label: string, index: number) {
+  const romanized = label
+    .replace(/[가-힣]+/g, (_, offset) => `field${offset}`)
+    .replace(/\s+/g, "_")
+    .replace(/[^a-zA-Z0-9_]/g, "")
+    .toLowerCase();
+  return romanized || `field_${index}`;
+}
+
 export default function CollectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [source, setSource] = useState<CollectSource | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("records");
 
-  // records tab
   const [records, setRecords] = useState<CollectRecord[]>([]);
   const [recordsTotal, setRecordsTotal] = useState(0);
   const [recordsLoading, setRecordsLoading] = useState(false);
 
-  // fields tab
   const [fields, setFields] = useState<FieldMapping[]>([]);
   const [isSavingFields, setIsSavingFields] = useState(false);
-
-  // script tab
-  const [script, setScript] = useState<string | null>(null);
-  const [scriptLoading, setScriptLoading] = useState(false);
-
-  // settings
   const [successTrigger, setSuccessTrigger] = useState("");
   const [redirectUrl, setRedirectUrl] = useState("");
+
+  const [script, setScript] = useState<string | null>(null);
+  const [scriptLoading, setScriptLoading] = useState(false);
+  // console sniffer paste
+  const [pasteJson, setPasteJson] = useState("");
+  const [pasteError, setPasteError] = useState("");
 
   const fetchSource = useCallback(async () => {
     setIsLoading(true);
@@ -147,7 +159,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
       });
       if (!res.ok) { toast.error("저장 실패"); return; }
       toast.success("필드 설정이 저장됐어요");
-      fetchScript();
+      if (tab === "script") fetchScript();
     } finally {
       setIsSavingFields(false);
     }
@@ -161,7 +173,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
     });
     if (!res.ok) { toast.error("저장 실패"); return; }
     toast.success("설정이 저장됐어요");
-    fetchSource();
+    setSource((s) => s ? { ...s, successTrigger, redirectUrl: redirectUrl || null } : s);
   };
 
   const handleToggle = async () => {
@@ -173,6 +185,47 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
     });
     if (!res.ok) { toast.error("상태 변경 실패"); return; }
     setSource((s) => s ? { ...s, isActive: !s.isActive } : s);
+  };
+
+  // 감지된 필드 한 번에 적용
+  const applyDiscoveredFields = () => {
+    if (!source?.discoveredFields) return;
+    const applied: FieldMapping[] = source.discoveredFields.map((f, i) => ({
+      id: `discovered-${i}`,
+      index: f.index,
+      key: toKey(f.label, f.index),
+      label: f.label || `필드 ${f.index}`,
+      type: f.type || "text",
+      isRequired: false,
+      sortOrder: i,
+    }));
+    setFields(applied);
+    toast.success("감지된 필드가 적용됐어요. 저장 버튼을 눌러 확정하세요");
+    setTab("fields");
+  };
+
+  // 콘솔 스니퍼 JSON 붙여넣기로 필드 적용
+  const applyPastedJson = () => {
+    setPasteError("");
+    try {
+      const parsed = JSON.parse(pasteJson);
+      if (!Array.isArray(parsed)) throw new Error("배열 형식이 아니에요");
+      const applied: FieldMapping[] = parsed.map((f: { index?: number; key?: string; label?: string; type?: string }, i: number) => ({
+        id: `pasted-${i}`,
+        index: typeof f.index === "number" ? f.index : i,
+        key: f.key || toKey(f.label ?? "", i),
+        label: f.label || `필드 ${i}`,
+        type: f.type || "text",
+        isRequired: false,
+        sortOrder: i,
+      }));
+      setFields(applied);
+      setPasteJson("");
+      toast.success(`${applied.length}개 필드가 적용됐어요. 저장 버튼을 눌러 확정하세요`);
+      setTab("fields");
+    } catch (e) {
+      setPasteError(e instanceof Error ? e.message : "JSON 형식이 올바르지 않아요");
+    }
   };
 
   const addField = () => {
@@ -195,6 +248,26 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
   const updateField = (idx: number, patch: Partial<FieldMapping>) => {
     setFields((f) => f.map((fld, i) => i === idx ? { ...fld, ...patch } : fld));
   };
+
+  // 콘솔 스니퍼 스크립트
+  const snifferScript = `(function() {
+  var groups = document.querySelectorAll(".form-group");
+  var fields = Array.from(groups).map(function(g, i) {
+    var label = g.querySelector("label");
+    var input = g.querySelector("input, select, textarea");
+    var labelText = (label ? label.textContent.trim() : "") ||
+      (input ? (input.placeholder || input.getAttribute("name") || "") : "");
+    var type = "text";
+    if (input) {
+      if (input.tagName === "SELECT") type = "select";
+      else if (input.type === "checkbox") type = "checkbox";
+    }
+    return { index: i, key: "field_" + i, label: labelText, type: type };
+  });
+  try { copy(JSON.stringify(fields, null, 2)); } catch(e) {}
+  console.log(JSON.stringify(fields, null, 2));
+  return fields;
+})();`;
 
   if (isLoading) {
     return (
@@ -239,16 +312,13 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button onClick={handleToggle} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border text-sm hover:bg-secondary transition-colors">
-              {source.isActive
-                ? <><ToggleRight className="w-4 h-4 text-violet-500" /><span className="text-violet-500">활성</span></>
-                : <><ToggleLeft className="w-4 h-4 text-muted-foreground" /><span className="text-muted-foreground">비활성</span></>}
-            </button>
-          </div>
+          <button onClick={handleToggle} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border text-sm hover:bg-secondary transition-colors shrink-0">
+            {source.isActive
+              ? <><ToggleRight className="w-4 h-4 text-violet-500" /><span className="text-violet-500">활성</span></>
+              : <><ToggleLeft className="w-4 h-4 text-muted-foreground" /><span className="text-muted-foreground">비활성</span></>}
+          </button>
         </div>
 
-        {/* API Key */}
         <div className="mt-4 flex items-center gap-2 px-3 py-2 rounded-xl bg-secondary border border-border">
           <span className="text-xs text-muted-foreground font-mono shrink-0">API Key</span>
           <span className="text-xs font-mono truncate flex-1">{source.apiKey}</span>
@@ -259,13 +329,9 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
       {/* 탭 */}
       <div className="flex gap-1 mb-6 border-b border-border">
         {TABS.map(({ id: tabId, label, icon: Icon }) => (
-          <button
-            key={tabId}
-            onClick={() => setTab(tabId)}
+          <button key={tabId} onClick={() => setTab(tabId)}
             className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-              tab === tabId
-                ? "border-violet-500 text-violet-500"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+              tab === tabId ? "border-violet-500 text-violet-500" : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
           >
             <Icon className="w-3.5 h-3.5" />{label}
@@ -278,11 +344,10 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
         ))}
       </div>
 
-      {/* 탭 콘텐츠 */}
       <AnimatePresence mode="wait">
         <motion.div key={tab} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
 
-          {/* 수집 데이터 */}
+          {/* 수집 데이터 탭 */}
           {tab === "records" && (
             <div>
               <div className="flex items-center justify-between mb-3">
@@ -332,43 +397,64 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
             </div>
           )}
 
-          {/* 필드 설정 */}
+          {/* 필드 설정 탭 */}
           {tab === "fields" && (
-            <div>
-              <div className="mb-4 space-y-3">
+            <div className="space-y-5">
+              {/* A: 자동 감지된 필드 */}
+              {source.discoveredFields && source.discoveredFields.length > 0 && (
+                <div className="p-4 rounded-2xl border border-violet-400/30 bg-violet-500/5">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-violet-500" />
+                      <span className="text-sm font-medium text-violet-500">스크립트가 감지한 필드</span>
+                    </div>
+                    <motion.button
+                      whileTap={{ scale: 0.95 }}
+                      onClick={applyDiscoveredFields}
+                      className="px-3 py-1.5 rounded-xl bg-violet-500 text-white text-xs font-medium hover:bg-violet-600 transition-colors"
+                    >
+                      한 번에 적용
+                    </motion.button>
+                  </div>
+                  <div className="space-y-1.5">
+                    {source.discoveredFields.map((f) => (
+                      <div key={f.index} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-background border border-border text-xs">
+                        <span className="w-6 text-center font-mono text-muted-foreground">{f.index}</span>
+                        <span className="flex-1 font-medium">{f.label || <span className="text-muted-foreground italic">라벨 없음</span>}</span>
+                        <span className="text-muted-foreground">{f.type}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-2">실제 폼 제출 시 스크립트가 감지한 필드예요. "한 번에 적용" 후 라벨과 키를 수정하세요.</p>
+                </div>
+              )}
+
+              {/* 트리거/리다이렉트 설정 */}
+              <div className="space-y-3">
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">성공 트리거 텍스트</label>
-                  <input
-                    type="text"
-                    value={successTrigger}
-                    onChange={(e) => setSuccessTrigger(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
-                  />
-                  <p className="text-[11px] text-muted-foreground mt-1">폼 제출 후 페이지에 이 텍스트가 나타나면 데이터를 수집해요</p>
+                  <input type="text" value={successTrigger} onChange={(e) => setSuccessTrigger(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400" />
+                  <p className="text-[11px] text-muted-foreground mt-1">폼 제출 후 이 텍스트가 나타나면 데이터를 수집해요</p>
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">제출 후 리다이렉트 URL</label>
-                  <input
-                    type="url"
-                    value={redirectUrl}
-                    onChange={(e) => setRedirectUrl(e.target.value)}
+                  <input type="url" value={redirectUrl} onChange={(e) => setRedirectUrl(e.target.value)}
                     placeholder="https://example.com/thank-you (선택)"
-                    className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
-                  />
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400" />
                 </div>
-                <button
-                  onClick={handleSaveSettings}
-                  className="px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors"
-                >
+                <button onClick={handleSaveSettings}
+                  className="px-4 py-2 rounded-xl bg-secondary border border-border text-sm font-medium hover:bg-secondary/80 transition-colors">
                   설정 저장
                 </button>
               </div>
 
-              <div className="border-t border-border pt-4">
+              {/* 필드 매핑 편집기 */}
+              <div className="border-t border-border pt-5">
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <h3 className="text-sm font-medium">필드 매핑</h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">아임웹 폼의 form-group 순서(0부터)와 매핑해요</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">인덱스는 아임웹 form-group 순서(0부터)예요</p>
                   </div>
                 </div>
 
@@ -378,42 +464,25 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                       <div className="flex items-center gap-2 p-3 rounded-xl border border-border bg-background">
                         <GripVertical className="w-4 h-4 text-muted-foreground/40 cursor-grab shrink-0" />
                         <div className="w-10 shrink-0">
-                          <input
-                            type="number"
-                            min={0}
-                            value={field.index}
+                          <input type="number" min={0} value={field.index}
                             onChange={(e) => updateField(idx, { index: parseInt(e.target.value) || 0 })}
                             className="w-full px-2 py-1 rounded-lg border border-border bg-background text-xs text-center focus:outline-none focus:border-violet-400"
-                            title="form-group 인덱스"
-                          />
+                            title="form-group 인덱스" />
                         </div>
-                        <input
-                          type="text"
-                          value={field.key}
-                          onChange={(e) => updateField(idx, { key: e.target.value })}
+                        <input type="text" value={field.key} onChange={(e) => updateField(idx, { key: e.target.value })}
                           placeholder="키 (영문)"
-                          className="flex-1 px-2 py-1 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
-                        />
-                        <input
-                          type="text"
-                          value={field.label}
-                          onChange={(e) => updateField(idx, { label: e.target.value })}
+                          className="flex-1 px-2 py-1 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400" />
+                        <input type="text" value={field.label} onChange={(e) => updateField(idx, { label: e.target.value })}
                           placeholder="라벨 (예: 이름)"
-                          className="flex-1 px-2 py-1 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
-                        />
-                        <select
-                          value={field.type}
-                          onChange={(e) => updateField(idx, { type: e.target.value })}
-                          className="px-2 py-1 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
-                        >
+                          className="flex-1 px-2 py-1 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400" />
+                        <select value={field.type} onChange={(e) => updateField(idx, { type: e.target.value })}
+                          className="px-2 py-1 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400">
                           <option value="text">텍스트</option>
                           <option value="select">선택</option>
                           <option value="checkbox">체크박스</option>
                         </select>
-                        <button
-                          onClick={() => removeField(idx)}
-                          className="p-1 rounded-lg hover:bg-red-500/10 hover:text-red-500 transition-colors text-muted-foreground shrink-0"
-                        >
+                        <button onClick={() => removeField(idx)}
+                          className="p-1 rounded-lg hover:bg-red-500/10 hover:text-red-500 transition-colors text-muted-foreground shrink-0">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
@@ -422,17 +491,12 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                 </Reorder.Group>
 
                 <div className="flex gap-2 mt-3">
-                  <button
-                    onClick={addField}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-dashed border-border text-sm text-muted-foreground hover:border-violet-400 hover:text-violet-500 transition-colors"
-                  >
+                  <button onClick={addField}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-dashed border-border text-sm text-muted-foreground hover:border-violet-400 hover:text-violet-500 transition-colors">
                     <Plus className="w-3.5 h-3.5" />필드 추가
                   </button>
-                  <button
-                    onClick={handleSaveFields}
-                    disabled={isSavingFields}
-                    className="px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
-                  >
+                  <button onClick={handleSaveFields} disabled={isSavingFields}
+                    className="px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40">
                     {isSavingFields ? "저장 중..." : "필드 저장"}
                   </button>
                 </div>
@@ -440,36 +504,77 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
             </div>
           )}
 
-          {/* 스크립트 */}
+          {/* 스크립트 탭 */}
           {tab === "script" && (
-            <div>
-              <div className="mb-4 p-4 rounded-2xl border border-amber-400/30 bg-amber-500/5">
-                <p className="text-sm font-medium text-amber-600">설치 방법</p>
-                <ol className="text-xs text-muted-foreground mt-2 space-y-1 list-decimal list-inside">
-                  <li>아임웹 관리자 → 사이트 설정 → 사용자 정의 코드</li>
-                  <li>하단 아래에 아래 스크립트를 붙여넣기</li>
-                  <li>필드 설정 탭에서 form-group 인덱스를 먼저 맞춰주세요</li>
-                </ol>
-              </div>
-              {scriptLoading ? (
-                <div className="flex items-center justify-center h-32">
-                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+            <div className="space-y-5">
+              {/* B: 콘솔 스니퍼 */}
+              <div className="p-4 rounded-2xl border border-border">
+                <div className="flex items-center gap-2 mb-3">
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                  <span className="text-sm font-medium">필드 자동 감지 (설치 전 사용)</span>
                 </div>
-              ) : script ? (
-                <div className="relative">
-                  <div className="absolute top-3 right-3 z-10">
-                    <CopyButton text={`<script>\n${script}\n</script>`} />
+                <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside mb-3">
+                  <li>아임웹 등록 폼 페이지를 열고 브라우저 콘솔(F12)을 엽니다</li>
+                  <li>아래 스크립트를 복사해서 콘솔에 붙여넣고 Enter</li>
+                  <li>출력된 JSON을 아래에 붙여넣기 → 필드 자동 입력</li>
+                </ol>
+                <div className="relative mb-3">
+                  <div className="absolute top-2 right-2">
+                    <CopyButton text={snifferScript} />
                   </div>
-                  <pre className="p-4 rounded-2xl bg-secondary border border-border text-xs font-mono overflow-x-auto whitespace-pre-wrap leading-relaxed">
-                    {`<script>\n${script}\n</script>`}
+                  <pre className="p-3 rounded-xl bg-secondary border border-border text-[11px] font-mono overflow-x-auto whitespace-pre-wrap leading-relaxed pr-10">
+                    {snifferScript}
                   </pre>
                 </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <Code2 className="w-8 h-8 text-muted-foreground/20 mb-3" />
-                  <p className="text-sm text-muted-foreground">필드를 먼저 설정하면 스크립트가 생성돼요</p>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <ClipboardPaste className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <span className="text-xs text-muted-foreground">콘솔 출력 결과 붙여넣기</span>
+                  </div>
+                  <textarea
+                    value={pasteJson}
+                    onChange={(e) => { setPasteJson(e.target.value); setPasteError(""); }}
+                    placeholder={'[\n  { "index": 0, "key": "field_0", "label": "이름", "type": "text" },\n  ...\n]'}
+                    rows={4}
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-background text-xs font-mono focus:outline-none focus:border-violet-400 resize-none"
+                  />
+                  {pasteError && <p className="text-xs text-red-500">{pasteError}</p>}
+                  <button
+                    onClick={applyPastedJson}
+                    disabled={!pasteJson.trim()}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500 text-white text-xs font-medium hover:bg-amber-600 transition-colors disabled:opacity-40"
+                  >
+                    <Check className="w-3.5 h-3.5" />필드 적용
+                  </button>
                 </div>
-              )}
+              </div>
+
+              {/* 실제 수집 스크립트 */}
+              <div>
+                <div className="mb-3 p-4 rounded-2xl border border-border bg-secondary/30">
+                  <p className="text-sm font-medium mb-1">아임웹 설치</p>
+                  <p className="text-xs text-muted-foreground">관리자 → 사이트 설정 → 사용자 정의 코드 → &lt;/body&gt; 앞에 붙여넣기</p>
+                </div>
+                {scriptLoading ? (
+                  <div className="flex items-center justify-center h-32">
+                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : script ? (
+                  <div className="relative">
+                    <div className="absolute top-3 right-3 z-10">
+                      <CopyButton text={`<script>\n${script}\n</script>`} />
+                    </div>
+                    <pre className="p-4 rounded-2xl bg-secondary border border-border text-xs font-mono overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                      {`<script>\n${script}\n</script>`}
+                    </pre>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <Code2 className="w-8 h-8 text-muted-foreground/20 mb-3" />
+                    <p className="text-sm text-muted-foreground">필드를 먼저 설정하면 스크립트가 생성돼요</p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

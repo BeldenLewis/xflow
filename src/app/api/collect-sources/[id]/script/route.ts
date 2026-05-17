@@ -47,6 +47,23 @@ ${fieldMap}
     };
   }
 
+  function getFieldMeta() {
+    var groups = document.querySelectorAll(".form-group");
+    return Array.from(groups).map(function(group, i) {
+      var labelEl = group.querySelector("label");
+      var input = group.querySelector("input, select, textarea");
+      var labelText = (labelEl ? labelEl.textContent.trim() : "") ||
+        (input ? (input.placeholder || input.getAttribute("name") || "") : "");
+      var type = "text";
+      if (input) {
+        if (input.tagName === "SELECT") type = "select";
+        else if (input.type === "checkbox") type = "checkbox";
+        else if (input.type === "radio") type = "radio";
+      }
+      return { index: i, label: labelText, type: type };
+    });
+  }
+
   function collectData() {
     var groups = document.querySelectorAll(".form-group");
     var data = {};
@@ -66,6 +83,7 @@ ${fieldMap}
       headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
       body: JSON.stringify({
         data: formData,
+        _fieldMeta: getFieldMeta(),
         utmSource: utm.utmSource,
         utmMedium: utm.utmMedium,
         utmCampaign: utm.utmCampaign,

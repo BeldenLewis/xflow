@@ -1,0 +1,110 @@
+"use client";
+
+import { useState, useRef, useEffect } from "react";
+import { Calendar, ChevronDown } from "lucide-react";
+import { kstDateString } from "@/lib/datetime";
+
+export interface DateRange {
+  from: Date;
+  to: Date;
+  label: string;
+}
+
+function presets(): DateRange[] {
+  const now = new Date();
+  const startOfTodayKST = () => {
+    const ks = kstDateString(now);
+    return new Date(ks + "T00:00:00+09:00");
+  };
+  const today = startOfTodayKST();
+  const endOfToday = new Date(today.getTime() + 86400_000 - 1);
+  return [
+    { from: today, to: endOfToday, label: "오늘" },
+    { from: new Date(today.getTime() - 86400_000), to: new Date(today.getTime() - 1), label: "어제" },
+    { from: new Date(today.getTime() - 7 * 86400_000), to: endOfToday, label: "최근 7일" },
+    { from: new Date(today.getTime() - 30 * 86400_000), to: endOfToday, label: "최근 30일" },
+    { from: new Date(today.getTime() - 90 * 86400_000), to: endOfToday, label: "최근 90일" },
+  ];
+}
+
+interface Props {
+  value: DateRange;
+  onChange: (range: DateRange) => void;
+}
+
+export default function DateRangePicker({ value, onChange }: Props) {
+  const [open, setOpen] = useState(false);
+  const [customFrom, setCustomFrom] = useState(kstDateString(value.from));
+  const [customTo, setCustomTo] = useState(kstDateString(value.to));
+  const dropRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (dropRef.current && !dropRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  const applyCustom = () => {
+    const from = new Date(customFrom + "T00:00:00+09:00");
+    const to = new Date(customTo + "T23:59:59+09:00");
+    if (isNaN(from.getTime()) || isNaN(to.getTime()) || from > to) return;
+    onChange({ from, to, label: `${customFrom} ~ ${customTo}` });
+    setOpen(false);
+  };
+
+  return (
+    <div ref={dropRef} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border bg-background text-xs hover:bg-secondary transition-colors"
+      >
+        <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+        <span>{value.label}</span>
+        <ChevronDown className="w-3 h-3 text-muted-foreground" />
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-border bg-card shadow-xl z-20 p-3 space-y-2">
+          <div className="space-y-1">
+            {presets().map((p) => (
+              <button
+                key={p.label}
+                onClick={() => { onChange(p); setOpen(false); }}
+                className={`w-full text-left px-3 py-1.5 rounded-lg text-xs transition-colors ${
+                  value.label === p.label ? "bg-violet-500/10 text-violet-500" : "hover:bg-secondary"
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <div className="border-t border-border pt-2 space-y-2">
+            <p className="text-[11px] text-muted-foreground">커스텀</p>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="date"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                className="flex-1 px-2 py-1 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+              />
+              <span className="text-xs text-muted-foreground">~</span>
+              <input
+                type="date"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                className="flex-1 px-2 py-1 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+              />
+            </div>
+            <button
+              onClick={applyCustom}
+              className="w-full py-1.5 rounded-lg bg-violet-500 text-white text-xs font-medium hover:bg-violet-600 transition-colors"
+            >
+              적용
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -36,42 +36,140 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 ${fieldMap}
   ];
 
-  var UTM_KEY = "xflow_utm";
+  // ── UTM 어트리뷰션 (first-touch + last-touch, 다중 저장소 폴백, referrer 추론) ──
+  var UTM_LAST_KEY  = "xflow_utm";        // 최근 유입 (덮어씀)
+  var UTM_FIRST_KEY = "xflow_utm_first";  // 최초 유입 (한번 설정되면 유지)
+  var UTM_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30일
 
-  function saveUTMIfPresent() {
-    var params = new URLSearchParams(window.location.search);
-    var source = params.get("utm_source");
-    if (!source) return;
+  var REFERRER_MAP = {
+    "google.com":      ["google",    "organic"],
+    "naver.com":       ["naver",     "organic"],
+    "daum.net":        ["daum",      "organic"],
+    "bing.com":        ["bing",      "organic"],
+    "yahoo.com":       ["yahoo",     "organic"],
+    "duckduckgo.com":  ["duckduckgo","organic"],
+    "facebook.com":    ["facebook",  "social"],
+    "instagram.com":   ["instagram", "social"],
+    "twitter.com":     ["twitter",   "social"],
+    "x.com":           ["twitter",   "social"],
+    "youtube.com":     ["youtube",   "social"],
+    "linkedin.com":    ["linkedin",  "social"],
+    "kakao.com":       ["kakao",     "social"],
+    "tistory.com":     ["tistory",   "referral"],
+    "brunch.co.kr":    ["brunch",    "referral"]
+  };
+
+  function emptyUtm() { return { utmSource:"", utmMedium:"", utmCampaign:"", utmTerm:"", utmContent:"", referrer:"", seenAt:"" }; }
+
+  function storageGet(key) {
+    // localStorage → sessionStorage → cookie 순서로 읽기
     try {
-      sessionStorage.setItem(UTM_KEY, JSON.stringify({
-        utmSource:   source,
-        utmMedium:   params.get("utm_medium")   || "",
-        utmCampaign: params.get("utm_campaign") || "",
-        utmTerm:     params.get("utm_term")     || "",
-        utmContent:  params.get("utm_content")  || "",
-      }));
+      var raw = localStorage.getItem(key);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (parsed && parsed._exp && parsed._exp > Date.now()) return parsed.v;
+        if (parsed && !parsed._exp) return parsed; // legacy
+      }
+    } catch(e) {}
+    try {
+      var raw2 = sessionStorage.getItem(key);
+      if (raw2) {
+        var p2 = JSON.parse(raw2);
+        return (p2 && p2.v) ? p2.v : p2;
+      }
+    } catch(e) {}
+    try {
+      var cookies = document.cookie ? document.cookie.split(";") : [];
+      for (var i = 0; i < cookies.length; i++) {
+        var c = cookies[i].replace(/^\\s+/, "");
+        if (c.indexOf(key + "=") === 0) {
+          return JSON.parse(decodeURIComponent(c.substring(key.length + 1)));
+        }
+      }
+    } catch(e) {}
+    return null;
+  }
+
+  function storageSet(key, value, ttlMs) {
+    var payload = JSON.stringify({ v: value, _exp: Date.now() + ttlMs });
+    try { localStorage.setItem(key, payload); } catch(e) {}
+    try { sessionStorage.setItem(key, payload); } catch(e) {}
+    try {
+      var maxAge = Math.floor(ttlMs / 1000);
+      document.cookie = key + "=" + encodeURIComponent(JSON.stringify(value)) + ";path=/;max-age=" + maxAge + ";SameSite=Lax";
     } catch(e) {}
   }
 
-  function getUTMParams() {
+  function readUrlUtm() {
     var params = new URLSearchParams(window.location.search);
-    if (params.get("utm_source")) {
+    if (!params.get("utm_source")) return null;
+    return {
+      utmSource:   params.get("utm_source")   || "",
+      utmMedium:   params.get("utm_medium")   || "",
+      utmCampaign: params.get("utm_campaign") || "",
+      utmTerm:     params.get("utm_term")     || "",
+      utmContent:  params.get("utm_content")  || "",
+      referrer:    document.referrer || "",
+      seenAt:      new Date().toISOString()
+    };
+  }
+
+  function inferFromReferrer() {
+    var ref = document.referrer;
+    if (!ref) return null;
+    try {
+      var u = new URL(ref);
+      var host = u.hostname.replace(/^www\\./, "").toLowerCase();
+      // 같은 사이트 내부 이동은 외부 유입 아님
+      if (u.hostname === location.hostname) return null;
+      var matched = null;
+      for (var k in REFERRER_MAP) {
+        if (host === k || host.endsWith("." + k)) { matched = REFERRER_MAP[k]; break; }
+      }
+      if (matched) {
+        return {
+          utmSource: matched[0], utmMedium: matched[1],
+          utmCampaign: "", utmTerm: "", utmContent: "",
+          referrer: ref, seenAt: new Date().toISOString()
+        };
+      }
       return {
-        utmSource:   params.get("utm_source")   || "",
-        utmMedium:   params.get("utm_medium")   || "",
-        utmCampaign: params.get("utm_campaign") || "",
-        utmTerm:     params.get("utm_term")     || "",
-        utmContent:  params.get("utm_content")  || "",
+        utmSource: host, utmMedium: "referral",
+        utmCampaign: "", utmTerm: "", utmContent: "",
+        referrer: ref, seenAt: new Date().toISOString()
       };
-    }
-    try {
-      var stored = sessionStorage.getItem(UTM_KEY);
-      if (stored) return JSON.parse(stored);
-    } catch(e) {}
-    return { utmSource: "", utmMedium: "", utmCampaign: "", utmTerm: "", utmContent: "" };
+    } catch(e) { return null; }
   }
 
-  saveUTMIfPresent();
+  // 매 페이지 로드마다 실행 — URL 에 utm 이 있으면 last 갱신 + (없으면) first 설정
+  function captureUtm() {
+    var urlUtm = readUrlUtm();
+    if (urlUtm) {
+      storageSet(UTM_LAST_KEY, urlUtm, UTM_TTL_MS);
+      if (!storageGet(UTM_FIRST_KEY)) storageSet(UTM_FIRST_KEY, urlUtm, UTM_TTL_MS);
+      return;
+    }
+    // URL 에 utm 없음 — first 가 아예 없으면 referrer 로 추론해서 저장
+    if (!storageGet(UTM_FIRST_KEY)) {
+      var refUtm = inferFromReferrer();
+      if (refUtm) {
+        storageSet(UTM_LAST_KEY, refUtm, UTM_TTL_MS);
+        storageSet(UTM_FIRST_KEY, refUtm, UTM_TTL_MS);
+      }
+    }
+  }
+  captureUtm();
+
+  function getUtmContext() {
+    var last = storageGet(UTM_LAST_KEY) || emptyUtm();
+    var first = storageGet(UTM_FIRST_KEY) || last;
+    // 둘 다 비어있는데 referrer 라도 있으면 last 로 채움 (이번 페이지 진입 시점)
+    if (!last.utmSource && !first.utmSource) {
+      var refUtm = inferFromReferrer();
+      if (refUtm) { last = refUtm; first = refUtm; }
+    }
+    return { last: last, first: first };
+  }
 
   function getFieldMeta() {
     var groups = document.querySelectorAll(".form-group");
@@ -134,7 +232,9 @@ ${fieldMap}
   }
 
   function sendData(formData) {
-    var utm = getUTMParams();
+    var ctx = getUtmContext();
+    var last = ctx.last;
+    var first = ctx.first;
     fetch(COLLECT_URL, {
       method: "POST",
       keepalive: true,
@@ -142,14 +242,21 @@ ${fieldMap}
       body: JSON.stringify({
         data: formData,
         _fieldMeta: getFieldMeta(),
-        utmSource: utm.utmSource,
-        utmMedium: utm.utmMedium,
-        utmCampaign: utm.utmCampaign,
-        utmTerm: utm.utmTerm,
-        utmContent: utm.utmContent,
+        utmSource:   last.utmSource,
+        utmMedium:   last.utmMedium,
+        utmCampaign: last.utmCampaign,
+        utmTerm:     last.utmTerm,
+        utmContent:  last.utmContent,
+        firstUtmSource:   first.utmSource,
+        firstUtmMedium:   first.utmMedium,
+        firstUtmCampaign: first.utmCampaign,
+        firstUtmTerm:     first.utmTerm,
+        firstUtmContent:  first.utmContent,
+        firstReferrer:    first.referrer || "",
+        firstSeenAt:      first.seenAt   || "",
         referrer: document.referrer,
-        userAgent: navigator.userAgent,
-      }),
+        userAgent: navigator.userAgent
+      })
     }).catch(function() {});
   }
 

@@ -109,18 +109,29 @@ export async function POST(request: Request) {
   const {
     data, _fieldMeta,
     utmSource, utmMedium, utmCampaign, utmTerm, utmContent,
+    firstUtmSource, firstUtmMedium, firstUtmCampaign, firstUtmTerm, firstUtmContent,
+    firstReferrer, firstSeenAt,
     referrer, userAgent,
   } = body as {
     data: Record<string, string>;
     _fieldMeta?: Array<{ index: number; label: string; type: string }>;
     utmSource?: string; utmMedium?: string; utmCampaign?: string;
     utmTerm?: string; utmContent?: string;
+    firstUtmSource?: string; firstUtmMedium?: string; firstUtmCampaign?: string;
+    firstUtmTerm?: string; firstUtmContent?: string;
+    firstReferrer?: string; firstSeenAt?: string;
     referrer?: string; userAgent?: string;
   };
 
   if (!data || typeof data !== "object") {
     return NextResponse.json({ error: "data 필드 필요" }, { status: 400, headers });
   }
+
+  const parseDate = (s?: string): Date | null => {
+    if (!s) return null;
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
+  };
 
   const recordData = {
     sourceId: source.id,
@@ -132,6 +143,13 @@ export async function POST(request: Request) {
     utmCampaign: utmCampaign ?? null,
     utmTerm: utmTerm ?? null,
     utmContent: utmContent ?? null,
+    firstUtmSource:   firstUtmSource   ?? null,
+    firstUtmMedium:   firstUtmMedium   ?? null,
+    firstUtmCampaign: firstUtmCampaign ?? null,
+    firstUtmTerm:     firstUtmTerm     ?? null,
+    firstUtmContent:  firstUtmContent  ?? null,
+    firstReferrer:    firstReferrer    ?? null,
+    firstSeenAt:      parseDate(firstSeenAt),
     referrer: referrer ?? null,
     userAgent: userAgent ?? null,
     ip: ip === "unknown" ? null : ip,

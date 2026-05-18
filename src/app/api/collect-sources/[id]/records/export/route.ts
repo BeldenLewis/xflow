@@ -35,7 +35,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const headers = [
     "시간 (KST)",
     ...source.fieldMappings.map((f) => f.label || f.key),
-    "UTM 소스", "UTM 매체", "UTM 캠페인", "UTM 키워드", "UTM 콘텐츠",
+    "UTM 소스 (last)", "UTM 매체 (last)", "UTM 캠페인 (last)", "UTM 키워드 (last)", "UTM 콘텐츠 (last)",
+    "First UTM 소스", "First UTM 매체", "First UTM 캠페인", "First UTM 키워드", "First UTM 콘텐츠",
+    "First Referrer", "First Seen (KST)",
     "Referrer",
   ];
 
@@ -49,6 +51,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       r.utmCampaign ?? "",
       r.utmTerm ?? "",
       r.utmContent ?? "",
+      r.firstUtmSource   ?? "",
+      r.firstUtmMedium   ?? "",
+      r.firstUtmCampaign ?? "",
+      r.firstUtmTerm     ?? "",
+      r.firstUtmContent  ?? "",
+      r.firstReferrer    ?? "",
+      r.firstSeenAt ? formatKstDateTime(r.firstSeenAt) : "",
       r.referrer ?? "",
     ];
   });

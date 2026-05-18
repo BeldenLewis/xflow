@@ -20,6 +20,13 @@ interface CollectRecord {
   utmCampaign: string | null;
   utmTerm: string | null;
   utmContent: string | null;
+  firstUtmSource: string | null;
+  firstUtmMedium: string | null;
+  firstUtmCampaign: string | null;
+  firstUtmTerm: string | null;
+  firstUtmContent: string | null;
+  firstReferrer: string | null;
+  firstSeenAt: string | null;
   referrer: string | null;
   createdAt: string;
 }
@@ -164,7 +171,7 @@ export default function RecordDetailModal({ sourceId, recordId, fieldMappings, o
               </div>
 
               <div className="space-y-2 border-t border-border pt-4">
-                <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">UTM · Referrer</p>
+                <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">최종 유입 (Last touch) · Referrer</p>
                 {([
                   ["utmSource", "UTM 소스"],
                   ["utmMedium", "UTM 매체"],
@@ -188,6 +195,32 @@ export default function RecordDetailModal({ sourceId, recordId, fieldMappings, o
                   </div>
                 ))}
               </div>
+
+              {/* 최초 유입 (편집 불가, 어트리뷰션 무결성 위해) */}
+              {(record.firstUtmSource || record.firstReferrer || record.firstSeenAt) && (
+                <div className="space-y-2 border-t border-border pt-4">
+                  <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">최초 유입 (First touch)</p>
+                  {([
+                    ["firstUtmSource", "UTM 소스"],
+                    ["firstUtmMedium", "UTM 매체"],
+                    ["firstUtmCampaign", "UTM 캠페인"],
+                    ["firstUtmTerm", "UTM 키워드"],
+                    ["firstUtmContent", "UTM 콘텐츠"],
+                    ["firstReferrer", "Referrer"],
+                  ] as const).map(([key, label]) => (
+                    <div key={key} className="grid grid-cols-[120px_1fr] gap-3 items-start">
+                      <div className="text-xs text-muted-foreground pt-2">{label}</div>
+                      <div className="text-sm py-2 break-words">{(record[key] as string) || <span className="text-muted-foreground italic">-</span>}</div>
+                    </div>
+                  ))}
+                  {record.firstSeenAt && (
+                    <div className="grid grid-cols-[120px_1fr] gap-3 items-start">
+                      <div className="text-xs text-muted-foreground pt-2">First Seen</div>
+                      <div className="text-sm py-2 text-muted-foreground">{formatKstDateTime(record.firstSeenAt)} KST</div>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           ) : null}
         </div>

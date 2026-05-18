@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { use } from "react";
 import { motion, AnimatePresence, Reorder } from "framer-motion";
 import {
@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useWorkspace } from "@/contexts/workspace";
 import ImportModal from "./ImportModal";
 import CleanupModal from "./CleanupModal";
 import RecordDetailModal from "./RecordDetailModal";
@@ -53,6 +55,8 @@ interface CollectSource {
   successTrigger: string;
   redirectUrl: string | null;
   isActive: boolean;
+  projectId: string;
+  workspaceId: string;
   webhookUrl: string | null;
   notifyOnSubmit: boolean;
   allowedOrigins: string[];
@@ -120,6 +124,8 @@ function toKey(label: string, index: number) {
 
 export default function CollectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
+  const { currentProject, workspace, setCurrentProject, projects } = useWorkspace();
   const [source, setSource] = useState<CollectSource | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("records");
@@ -350,6 +356,33 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
   }, [id]);
 
   useEffect(() => { fetchSource(); }, [fetchSource]);
+
+  // 프로젝트 컨텍스트 ↔ URL 의 소스 동기화
+  // - 처음 로드: URL 의 소스 projectId 와 currentProject 가 다르면 currentProject 를 맞춤
+  // - 그 뒤 사용자가 프로젝트를 다른 곳으로 전환하면 /collect 목록으로 이동
+  const syncedRef = useRef(false);
+  useEffect(() => {
+    if (!source || !currentProject || projects.length === 0) return;
+    if (source.projectId === currentProject.id) {
+      syncedRef.current = true;
+      return;
+    }
+    if (!syncedRef.current) {
+      // 초기 동기화: URL 기준으로 프로젝트 맞추기
+      const proj = projects.find((p) => p.id === source.projectId);
+      if (proj) setCurrentProject(proj);
+      else router.replace("/collect");
+    } else {
+      // 사용자가 프로젝트를 바꿈 → 목록으로
+      router.replace("/collect");
+    }
+  }, [source, currentProject, projects, setCurrentProject, router]);
+
+  // 워크스페이스가 다르면 접근 불가 → 목록으로
+  useEffect(() => {
+    if (!source || !workspace) return;
+    if (source.workspaceId !== workspace.id) router.replace("/collect");
+  }, [source, workspace, router]);
   useEffect(() => { if (tab === "records") fetchRecords(); }, [tab, fetchRecords]);
   useEffect(() => { if (tab === "script") fetchScript(); }, [tab, fetchScript]);
   useEffect(() => { if (tab === "activity") fetchActivity(); }, [tab, fetchActivity]);

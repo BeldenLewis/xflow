@@ -815,24 +815,24 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                             aria-label="현재 페이지 모두 선택"
                           />
                         </th>
-                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground whitespace-nowrap">
                           <button onClick={() => cycleSort("createdAt")} className="flex items-center gap-1 hover:text-foreground transition-colors">
                             시간 {sortIcon("createdAt")}
                           </button>
                         </th>
                         {source.fieldMappings.map((f) => (
-                          <th key={f.id} className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">
+                          <th key={f.id} className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground whitespace-nowrap">
                             <button onClick={() => cycleSort("field", f.key)} className="flex items-center gap-1 hover:text-foreground transition-colors">
                               {f.label} {sortIcon("field", f.key)}
                             </button>
                           </th>
                         ))}
-                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground whitespace-nowrap">
                           <button onClick={() => cycleSort("utmSource")} className="flex items-center gap-1 hover:text-foreground transition-colors">
                             UTM 소스 {sortIcon("utmSource")}
                           </button>
                         </th>
-                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground whitespace-nowrap">
                           <button onClick={() => cycleSort("utmMedium")} className="flex items-center gap-1 hover:text-foreground transition-colors">
                             UTM 매체 {sortIcon("utmMedium")}
                           </button>

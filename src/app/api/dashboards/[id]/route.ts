@@ -1,0 +1,63 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { prisma } from "@/lib/prisma";
+import { randomBytes } from "node:crypto";
+
+async function authorize(id: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: NextResponse.json({ error: "인증 필요" }, { status: 401 }) };
+
+  const dashboard = await prisma.dashboard.findUnique({ where: { id } });
+  if (!dashboard) return { error: NextResponse.json({ error: "보드 없음" }, { status: 404 }) };
+
+  const membership = await prisma.workspaceMember.findUnique({
+    where: { userId_workspaceId: { userId: user.id, workspaceId: dashboard.workspaceId } },
+  });
+  if (!membership) return { error: NextResponse.json({ error: "접근 권한 없음" }, { status: 403 }) };
+
+  return { dashboard, userId: user.id };
+}
+
+export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const auth = await authorize(id);
+  if ("error" in auth) return auth.error;
+  return NextResponse.json({ dashboard: auth.dashboard });
+}
+
+export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const auth = await authorize(id);
+  if ("error" in auth) return auth.error;
+
+  const body = await request.json();
+  const { name, description, shareEnabled } = body;
+
+  const data: Record<string, unknown> = {};
+  if (name !== undefined) data.name = name;
+  if (description !== undefined) data.description = description || null;
+  if (shareEnabled !== undefined) {
+    data.shareEnabled = !!shareEnabled;
+    if (shareEnabled && !auth.dashboard.shareToken) {
+      data.shareToken = randomBytes(24).toString("base64url");
+    }
+  }
+
+  const updated = await prisma.dashboard.update({ where: { id }, data });
+  return NextResponse.json({ dashboard: updated });
+}
+
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const auth = await authorize(id);
+  if ("error" in auth) return auth.error;
+
+  // 기본 보드는 삭제 못 함
+  if (auth.dashboard.isDefault) {
+    return NextResponse.json({ error: "기본 보드는 삭제할 수 없어요" }, { status: 400 });
+  }
+
+  await prisma.dashboard.delete({ where: { id } });
+  return NextResponse.json({ ok: true });
+}

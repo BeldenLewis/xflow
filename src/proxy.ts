@@ -32,6 +32,19 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // /api/public 과 /share 는 토큰 기반 공개 — 미들웨어 통과
+  if (
+    request.nextUrl.pathname.startsWith("/api/public") ||
+    request.nextUrl.pathname.startsWith("/share")
+  ) {
+    return NextResponse.next();
+  }
+
+  // 크론 워커 (인증된 호출 — secret 헤더로 보호되어야 함)
+  if (request.nextUrl.pathname.startsWith("/api/cron")) {
+    return NextResponse.next();
+  }
+
   const publicPages = ["/", "/signup", "/reset-password"];
   const isPublicPage = publicPages.includes(request.nextUrl.pathname);
 

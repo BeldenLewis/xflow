@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { dashboardCache } from "@/lib/cache";
+import { createHash } from "node:crypto";
 
 type WidgetType =
   | "kpi"
@@ -8,7 +10,21 @@ type WidgetType =
   | "utm_breakdown"
   | "top_n"
   | "field_distribution"
-  | "recent_feed";
+  | "recent_feed"
+  | "performance_table"
+  | "heatmap"
+  | "gauge"
+  | "sparkline_kpi"
+  | "funnel"
+  | "auto_insight";
+
+interface GlobalFilters {
+  sourceId?: string | null;       // 위젯 sourceId 위에 override
+  utmSource?: string | null;
+  utmMedium?: string | null;
+  utmCampaign?: string | null;
+  attribution?: "last" | "first"; // 모든 utm 필드를 last/first 중 한쪽으로 해석
+}
 
 interface RequestBody {
   workspaceId: string;
@@ -17,6 +33,7 @@ interface RequestBody {
   config: Record<string, unknown>;
   from?: string;
   to?: string;
+  filters?: GlobalFilters;
 }
 
 function parseDate(s: string | undefined, fallback: Date): Date {
@@ -35,14 +52,33 @@ function getNumberConfig(config: Record<string, unknown>, key: string, def: numb
   return typeof v === "number" && !isNaN(v) ? v : def;
 }
 
-// 데이터 범위 빌더
-async function recordWhere(projectId: string, config: Record<string, unknown>, from: Date, to: Date) {
-  const sourceId = getStringConfig(config, "sourceId");
-  return {
+// 데이터 범위 빌더 — 위젯 config + 전역 필터 결합
+function recordWhere(
+  projectId: string,
+  config: Record<string, unknown>,
+  from: Date,
+  to: Date,
+  filters?: GlobalFilters,
+): Record<string, unknown> {
+  const widgetSourceId = getStringConfig(config, "sourceId");
+  const globalSourceId = filters?.sourceId && filters.sourceId !== "all" ? filters.sourceId : undefined;
+  // 전역 필터의 소스가 우선
+  const sourceId = globalSourceId ?? widgetSourceId;
+
+  const useFirst = filters?.attribution === "first";
+  const utmCol = useFirst
+    ? { source: "firstUtmSource", medium: "firstUtmMedium", campaign: "firstUtmCampaign" }
+    : { source: "utmSource", medium: "utmMedium", campaign: "utmCampaign" };
+
+  const where: Record<string, unknown> = {
     projectId,
     ...(sourceId && sourceId !== "all" ? { sourceId } : {}),
     createdAt: { gte: from, lte: to },
   };
+  if (filters?.utmSource)   where[utmCol.source]   = filters.utmSource;
+  if (filters?.utmMedium)   where[utmCol.medium]   = filters.utmMedium;
+  if (filters?.utmCampaign) where[utmCol.campaign] = filters.utmCampaign;
+  return where;
 }
 
 export async function POST(request: Request) {
@@ -69,7 +105,19 @@ export async function POST(request: Request) {
   const from = parseDate(body.from, defaultFrom);
   const to = parseDate(body.to, now);
 
-  const where = await recordWhere(projectId, config ?? {}, from, to);
+  // 캐시 키 — 동일 쿼리에 대해 15초간 결과 재사용
+  const cacheKey = "dash:" + createHash("sha1").update(JSON.stringify({
+    projectId, type, config, from: from.toISOString(), to: to.toISOString(), filters: body.filters,
+  })).digest("hex");
+  const cached = dashboardCache.get(cacheKey);
+  if (cached) return NextResponse.json(cached);
+
+  const where = recordWhere(projectId, config ?? {}, from, to, body.filters);
+
+  const respond = (payload: unknown) => {
+    dashboardCache.set(cacheKey, payload);
+    return NextResponse.json(payload);
+  };
 
   switch (type) {
     case "kpi": {
@@ -86,18 +134,49 @@ export async function POST(request: Request) {
       const change = previous !== null && previous > 0
         ? ((total - previous) / previous) * 100
         : null;
-      return NextResponse.json({ value: total, previous, change });
+      return respond({ value: total, previous, change });
+    }
+
+    case "sparkline_kpi": {
+      const total = await prisma.collectRecord.count({ where });
+      const records = await prisma.collectRecord.findMany({
+        where, select: { createdAt: true }, orderBy: { createdAt: "asc" },
+      });
+      const points = bucketize(records.map((r) => r.createdAt), "day", from, to);
+      const span = to.getTime() - from.getTime();
+      const prevFrom = new Date(from.getTime() - span);
+      const prevTotal = await prisma.collectRecord.count({
+        where: { ...where, createdAt: { gte: prevFrom, lt: from } },
+      });
+      const change = prevTotal > 0 ? ((total - prevTotal) / prevTotal) * 100 : null;
+      return respond({ value: total, points, previous: prevTotal, change });
+    }
+
+    case "gauge": {
+      const total = await prisma.collectRecord.count({ where });
+      const target = typeof config?.target === "number" ? config.target : 100;
+      return respond({ value: total, target, percent: target > 0 ? (total / target) * 100 : 0 });
     }
 
     case "time_series": {
       const granularity = (getStringConfig(config ?? {}, "granularity") ?? "day") as "hour" | "day" | "week";
       const records = await prisma.collectRecord.findMany({
-        where,
-        select: { createdAt: true },
-        orderBy: { createdAt: "asc" },
+        where, select: { createdAt: true }, orderBy: { createdAt: "asc" },
       });
       const points = bucketize(records.map((r) => r.createdAt), granularity, from, to);
-      return NextResponse.json({ points, granularity });
+      let prevPoints: { date: string; count: number }[] | null = null;
+      if (config?.compareWithPrevious) {
+        const span = to.getTime() - from.getTime();
+        const prevFrom = new Date(from.getTime() - span);
+        const prevTo = from;
+        const prevWhere = { ...where, createdAt: { gte: prevFrom, lt: prevTo } };
+        const prevRecords = await prisma.collectRecord.findMany({
+          where: prevWhere, select: { createdAt: true }, orderBy: { createdAt: "asc" },
+        });
+        // 이전 기간을 현재 기간 라벨에 매핑 (시각화 위해 같은 x축 사용)
+        prevPoints = bucketize(prevRecords.map((r) => new Date(r.createdAt.getTime() + span)), granularity, from, to);
+      }
+      return respond({ points, prevPoints, granularity });
     }
 
     case "utm_breakdown": {
@@ -122,7 +201,7 @@ export async function POST(request: Request) {
       const items = Array.from(counts.entries())
         .map(([key, count]) => ({ key, count, percent: total > 0 ? (count / total) * 100 : 0 }))
         .sort((a, b) => b.count - a.count);
-      return NextResponse.json({ items, total });
+      return respond({ items, total });
     }
 
     case "top_n": {
@@ -163,7 +242,7 @@ export async function POST(request: Request) {
         .map(([key, count]) => ({ key, count }))
         .sort((a, b) => b.count - a.count)
         .slice(0, topN);
-      return NextResponse.json({ items });
+      return respond({ items });
     }
 
     case "field_distribution": {
@@ -188,7 +267,175 @@ export async function POST(request: Request) {
       const items = Array.from(counts.entries())
         .map(([key, count]) => ({ key, count, percent: total > 0 ? (count / total) * 100 : 0 }))
         .sort((a, b) => b.count - a.count);
-      return NextResponse.json({ items, total });
+      return respond({ items, total });
+    }
+
+    case "performance_table": {
+      const dimension = (getStringConfig(config ?? {}, "dimension") ?? "utmCampaign") as string;
+      const topN = getNumberConfig(config ?? {}, "topN", 20);
+      const ALLOWED = new Set([
+        "utmSource", "utmMedium", "utmCampaign", "utmTerm", "utmContent",
+        "firstUtmSource", "firstUtmMedium", "firstUtmCampaign",
+        "sourceId",
+      ]);
+      const safeDim = ALLOWED.has(dimension) ? dimension : "utmCampaign";
+
+      const records = await prisma.collectRecord.findMany({
+        where,
+        select: {
+          [safeDim]: true, createdAt: true,
+        } as never,
+      }) as unknown as Array<Record<string, string | Date | null>>;
+
+      const span = to.getTime() - from.getTime();
+      const prevFrom = new Date(from.getTime() - span);
+      const prevRecords = await prisma.collectRecord.findMany({
+        where: { ...where, createdAt: { gte: prevFrom, lt: from } },
+        select: { [safeDim]: true } as never,
+      }) as unknown as Array<Record<string, string | null>>;
+
+      const counts = new Map<string, number>();
+      for (const r of records) {
+        const v = (r[safeDim] as string | null) ?? "(없음)";
+        const key = String(v) || "(없음)";
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      const prevCounts = new Map<string, number>();
+      for (const r of prevRecords) {
+        const v = (r[safeDim] ?? "(없음)") as string;
+        prevCounts.set(v, (prevCounts.get(v) ?? 0) + 1);
+      }
+      // 소스 ID → 소스 이름 lookup (필요할 때만)
+      const nameMap = new Map<string, string>();
+      if (safeDim === "sourceId") {
+        const sources = await prisma.collectSource.findMany({
+          where: { projectId },
+          select: { id: true, name: true },
+        });
+        sources.forEach((s) => nameMap.set(s.id, s.name));
+      }
+
+      const total = records.length;
+      const items = Array.from(counts.entries())
+        .map(([key, count]) => {
+          const prev = prevCounts.get(key) ?? 0;
+          const change = prev > 0 ? ((count - prev) / prev) * 100 : null;
+          return {
+            key,
+            display: nameMap.get(key) ?? key,
+            count,
+            previous: prev,
+            change,
+            share: total > 0 ? (count / total) * 100 : 0,
+          };
+        })
+        .sort((a, b) => b.count - a.count)
+        .slice(0, topN);
+
+      return respond({ items, total, dimension: safeDim });
+    }
+
+    case "heatmap": {
+      const records = await prisma.collectRecord.findMany({
+        where, select: { createdAt: true },
+      });
+      const KST_OFFSET = 9 * 60 * 60_000;
+      // 7 (월-일) x 24 (시) 매트릭스
+      const matrix: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
+      for (const r of records) {
+        const kst = new Date(r.createdAt.getTime() + KST_OFFSET);
+        const dow = (kst.getUTCDay() + 6) % 7; // 월=0
+        const hour = kst.getUTCHours();
+        matrix[dow][hour]++;
+      }
+      let max = 0;
+      for (const row of matrix) for (const v of row) if (v > max) max = v;
+      return respond({ matrix, max });
+    }
+
+    case "funnel": {
+      const stages = Array.isArray(config?.funnelStages) ? (config.funnelStages as string[]) : [];
+      if (stages.length === 0) {
+        return NextResponse.json({ stages: [], error: "단계 설정 필요" });
+      }
+      const results = await Promise.all(stages.map(async (sourceId) => {
+        const count = await prisma.collectRecord.count({
+          where: {
+            projectId,
+            sourceId,
+            createdAt: { gte: from, lte: to },
+          },
+        });
+        const source = await prisma.collectSource.findUnique({ where: { id: sourceId }, select: { name: true } });
+        return { sourceId, name: source?.name ?? sourceId, count };
+      }));
+      const top = results[0]?.count ?? 0;
+      const enriched = results.map((r, i) => ({
+        ...r,
+        percentOfTop: top > 0 ? (r.count / top) * 100 : 0,
+        percentOfPrev: i === 0 ? 100 : (results[i - 1].count > 0 ? (r.count / results[i - 1].count) * 100 : 0),
+      }));
+      return respond({ stages: enriched });
+    }
+
+    case "auto_insight": {
+      // 현재 기간 vs 이전 기간 비교, UTM 소스/매체별 큰 변화 감지
+      const span = to.getTime() - from.getTime();
+      const prevFrom = new Date(from.getTime() - span);
+      const useFirst = body.filters?.attribution === "first";
+      const sourceCol = useFirst ? "firstUtmSource" : "utmSource";
+      const mediumCol = useFirst ? "firstUtmMedium" : "utmMedium";
+
+      const [currRows, prevRows] = await Promise.all([
+        prisma.collectRecord.findMany({
+          where,
+          select: { [sourceCol]: true, [mediumCol]: true } as never,
+        }) as unknown as Promise<Array<Record<string, string | null>>>,
+        prisma.collectRecord.findMany({
+          where: { ...where, createdAt: { gte: prevFrom, lt: from } },
+          select: { [sourceCol]: true, [mediumCol]: true } as never,
+        }) as unknown as Promise<Array<Record<string, string | null>>>,
+      ]);
+
+      function tally(rows: Array<Record<string, string | null>>, col: string) {
+        const m = new Map<string, number>();
+        for (const r of rows) {
+          const v = (r[col] ?? "(없음)") as string;
+          m.set(v, (m.get(v) ?? 0) + 1);
+        }
+        return m;
+      }
+      const insights: { type: "up" | "down" | "new" | "gone"; label: string; detail: string; change: number | null }[] = [];
+
+      for (const col of [sourceCol, mediumCol] as const) {
+        const curr = tally(currRows, col);
+        const prev = tally(prevRows, col);
+        const dimensionName = col === sourceCol ? "UTM 소스" : "UTM 매체";
+        const keys = new Set([...curr.keys(), ...prev.keys()]);
+        for (const k of keys) {
+          if (k === "(없음)" || !k) continue;
+          const c = curr.get(k) ?? 0;
+          const p = prev.get(k) ?? 0;
+          if (p === 0 && c >= 3) {
+            insights.push({ type: "new", label: `🚀 신규 채널: ${k}`, detail: `${dimensionName} "${k}" 가 이번 기간 ${c}건 신규 발생`, change: null });
+          } else if (c === 0 && p >= 5) {
+            insights.push({ type: "gone", label: `📉 사라진 채널: ${k}`, detail: `${dimensionName} "${k}" 가 ${p}건 → 0건 (활동 중단)`, change: -100 });
+          } else if (p > 0) {
+            const change = ((c - p) / p) * 100;
+            if (Math.abs(change) >= 50 && (c + p) >= 10) {
+              insights.push({
+                type: change > 0 ? "up" : "down",
+                label: `${change > 0 ? "🔥" : "⚠️"} ${k}: ${change > 0 ? "+" : ""}${change.toFixed(0)}%`,
+                detail: `${dimensionName} "${k}" ${p}건 → ${c}건`,
+                change,
+              });
+            }
+          }
+        }
+      }
+
+      insights.sort((a, b) => Math.abs((b.change ?? 999)) - Math.abs((a.change ?? 999)));
+      return respond({ insights: insights.slice(0, 10) });
     }
 
     case "recent_feed": {
@@ -199,7 +446,7 @@ export async function POST(request: Request) {
         take: Math.min(Math.max(limit, 1), 50),
         include: { source: { select: { id: true, name: true } } },
       });
-      return NextResponse.json({ items: records });
+      return respond({ items: records });
     }
 
     default:

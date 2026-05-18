@@ -37,10 +37,12 @@ model Workspace {
   utmPresets     UTMPreset[]
   utmTemplates   UTMTemplate[]
   invitations    WorkspaceInvitation[]
-  collectSources CollectSource[]
-  collectRecords CollectRecord[]
-  activityLogs   ActivityLog[]
+  collectSources   CollectSource[]
+  collectRecords   CollectRecord[]
+  activityLogs     ActivityLog[]
   dashboardWidgets DashboardWidget[]
+  dashboards       Dashboard[]
+  scheduledReports ScheduledReport[]
 }
 
 model WorkspaceMember {
@@ -102,6 +104,7 @@ model Project {
   collectSources   CollectSource[]
   collectRecords   CollectRecord[]
   dashboardWidgets DashboardWidget[]
+  dashboards       Dashboard[]
 }
 
 model UTMPreset {
@@ -222,22 +225,67 @@ model ActivityLog {
   @@index([sourceId, createdAt(sort: Desc)])
 }
 
+model Dashboard {
+  id           String   @id @default(cuid())
+  projectId    String
+  workspaceId  String
+  name         String
+  description  String?
+  sortOrder    Int      @default(0)
+  isDefault    Boolean  @default(false)
+  shareToken   String?  @unique
+  shareEnabled Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  project          Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  widgets          DashboardWidget[]
+  scheduledReports ScheduledReport[]
+
+  @@index([projectId, sortOrder])
+}
+
 model DashboardWidget {
   id          String   @id @default(cuid())
+  dashboardId String?
   projectId   String
   workspaceId String
-  type        String   // kpi | time_series | utm_breakdown | top_n | field_distribution | recent_feed
+  type        String
   title       String
-  config      Json     // 위젯별 설정 (sourceId, field, metric, dimension, topN, granularity 등)
+  config      Json
   position    Int      @default(0)
-  width       String   @default("half") // full | half | third
+  width       String   @default("half")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  dashboard Dashboard? @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([dashboardId, position])
+  @@index([projectId, position])
+}
+
+model ScheduledReport {
+  id          String   @id @default(cuid())
+  dashboardId String
+  workspaceId String
+  name        String
+  cron        String   // 예: "0 9 * * 1" (매주 월 9시)
+  channel     String   // "slack" | "email"
+  target      String   // slack webhook URL 또는 이메일 주소
+  isActive    Boolean  @default(true)
+  lastRunAt   DateTime?
+  nextRunAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  dashboard Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
-  @@index([projectId, position])
+  @@index([nextRunAt])
+  @@index([dashboardId])
 }
 
 model UTMLink {

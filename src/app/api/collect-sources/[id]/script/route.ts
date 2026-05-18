@@ -96,8 +96,39 @@ ${fieldMap}
     FIELD_MAP.forEach(function(field) {
       var group = groups[field.index];
       if (!group) return;
-      var input = group.querySelector("input, select, textarea");
-      if (input) data[field.key] = input.value || "";
+      var els = group.querySelectorAll("input, select, textarea");
+      if (!els || els.length === 0) return;
+
+      // 체크박스/라디오: 체크된 항목들의 라벨 텍스트(없으면 value) 콤마로 join
+      var checked = [];
+      var hasChoice = false;
+      var textValues = [];
+      Array.prototype.forEach.call(els, function(el) {
+        var t = (el.type || "").toLowerCase();
+        if (t === "checkbox" || t === "radio") {
+          hasChoice = true;
+          if (el.checked) {
+            var label = el.closest ? el.closest("label") : null;
+            var txt = label ? (label.textContent || "").trim() : "";
+            checked.push(txt || el.value || "");
+          }
+        } else {
+          var v = (el.value || "").trim();
+          if (v) textValues.push(v);
+        }
+      });
+
+      if (hasChoice) {
+        data[field.key] = checked.join(", ");
+      } else if (textValues.length === 0) {
+        data[field.key] = "";
+      } else if (textValues.length === 1) {
+        data[field.key] = textValues[0];
+      } else {
+        // 휴대폰처럼 분할된 input — 모두 숫자면 그대로 이어붙임, 아니면 공백으로 join
+        var allNumeric = textValues.every(function(v) { return /^\d+$/.test(v); });
+        data[field.key] = textValues.join(allNumeric ? "" : " ");
+      }
     });
     return data;
   }

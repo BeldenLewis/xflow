@@ -12,6 +12,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/contexts/workspace";
 import { Select } from "@/components/ui/select";
+import { formatKst, kstDateString, kstYear } from "@/lib/datetime";
 
 const BASIC_SOURCES = [
   { label: "구글",       value: "google" },
@@ -58,7 +59,7 @@ function getDateGroup(dateStr: string): string {
   if (diffDays === 1) return "어제";
   if (diffDays < 7)  return "이번 주";
   if (diffDays < 30) return "이번 달";
-  return `${date.getFullYear()}년 ${date.getMonth() + 1}월`;
+  return formatKst(date, { year: "numeric", month: "long" });
 }
 
 function hasCampaignFormatIssue(campaign: string) {
@@ -74,7 +75,7 @@ function exportToCSV(links: UTMLink[]) {
   const rows = links.map((l) => [
     l.name ?? "", l.url, l.utmSource, l.utmMedium, l.utmCampaign,
     l.utmTerm ?? "", l.utmContent ?? "", l.fullUrl, l.shortUrl ?? "",
-    new Date(l.createdAt).toLocaleDateString("ko-KR"), l.createdBy.name ?? "",
+    formatKst(l.createdAt, { year: "numeric", month: "2-digit", day: "2-digit" }), l.createdBy.name ?? "",
   ]);
   const csv = [headers, ...rows]
     .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
@@ -82,7 +83,7 @@ function exportToCSV(links: UTMLink[]) {
   const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `utm-links-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `utm-links-${kstDateString()}.csv`;
   a.click();
   toast.success("CSV 다운로드됨");
 }
@@ -380,7 +381,7 @@ function UTMRow({ link, onDelete, onShortUrlSaved, onEdit, onDuplicate }: {
               </div>
 
               <p className="text-xs text-muted-foreground">
-                {new Date(link.createdAt).toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" })} · {link.createdBy.name ?? "알 수 없음"}
+                {formatKst(link.createdAt, { year: "numeric", month: "long", day: "numeric" })} · {link.createdBy.name ?? "알 수 없음"}
                 {link.utmTerm && <> · term: <span className="font-mono">{link.utmTerm}</span></>}
                 {link.utmContent && <> · content: <span className="font-mono">{link.utmContent}</span></>}
               </p>
@@ -1021,7 +1022,7 @@ export default function UTMBuilderPage() {
   useEffect(() => { fetchLinks(); }, [fetchLinks]);
   useEffect(() => { fetchPresetsAndTemplates(); }, [fetchPresetsAndTemplates]);
 
-  const years    = useMemo(() => [...new Set(savedLinks.map((l) => String(new Date(l.createdAt).getFullYear())))].sort().reverse(), [savedLinks]);
+  const years    = useMemo(() => [...new Set(savedLinks.map((l) => kstYear(l.createdAt)))].sort().reverse(), [savedLinks]);
   const sources  = useMemo(() => [...new Set(savedLinks.map((l) => l.utmSource))].sort(), [savedLinks]);
   const mediums  = useMemo(() => [...new Set(savedLinks.map((l) => l.utmMedium))].sort(), [savedLinks]);
   const campaigns = useMemo(() => [...new Set(savedLinks.map((l) => l.utmCampaign))].sort(), [savedLinks]);
@@ -1040,7 +1041,7 @@ export default function UTMBuilderPage() {
       .filter((l) => !pendingDeletes.has(l.id))
       .filter((l) => {
         const matchSearch   = !q || [l.name, l.utmSource, l.utmMedium, l.utmCampaign, l.fullUrl].some((v) => v?.toLowerCase().includes(q));
-        const matchYear     = !filterYear    || String(new Date(l.createdAt).getFullYear()) === filterYear;
+        const matchYear     = !filterYear    || kstYear(l.createdAt) === filterYear;
         const matchSource   = !filterSource  || l.utmSource    === filterSource;
         const matchMedium   = !filterMedium  || l.utmMedium    === filterMedium;
         const matchCampaign = !filterCampaign || l.utmCampaign === filterCampaign;

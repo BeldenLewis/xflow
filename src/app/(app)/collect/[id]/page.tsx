@@ -1,15 +1,32 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { use } from "react";
 import { motion, AnimatePresence, Reorder } from "framer-motion";
 import {
   ArrowLeft, Database, Globe, Copy, Check, Plus, Trash2,
   GripVertical, Code2, Table2, Settings2, Loader2, RefreshCw,
   ToggleLeft, ToggleRight, ExternalLink, Sparkles, ClipboardPaste,
+  Download, Upload, ArrowUp, ArrowDown, ChevronsUpDown, Wand2,
+  ChevronLeft, ChevronRight, Search, Filter, Activity, Shield,
+  RefreshCcw, Bell, Webhook, KeyRound, Eraser, AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
+import ImportModal from "./ImportModal";
+import CleanupModal from "./CleanupModal";
+import RecordDetailModal from "./RecordDetailModal";
+import NormalizeModal from "./NormalizeModal";
+import TestModal from "./TestModal";
+import DangerDeleteModal from "./DangerDeleteModal";
+import { formatKst, formatKstDateTime } from "@/lib/datetime";
+
+type SortKind = "createdAt" | "field" | "utmSource" | "utmMedium";
+interface SortState {
+  kind: SortKind;
+  fieldKey?: string;
+  dir: "asc" | "desc";
+}
 
 interface FieldMapping {
   id: string;
@@ -36,6 +53,9 @@ interface CollectSource {
   successTrigger: string;
   redirectUrl: string | null;
   isActive: boolean;
+  webhookUrl: string | null;
+  notifyOnSubmit: boolean;
+  allowedOrigins: string[];
   fieldMappings: FieldMapping[];
   discoveredFields: DiscoveredField[] | null;
   _count: { records: number };
@@ -47,14 +67,26 @@ interface CollectRecord {
   utmSource: string | null;
   utmMedium: string | null;
   utmCampaign: string | null;
+  utmTerm: string | null;
+  utmContent: string | null;
   referrer: string | null;
   createdAt: string;
+}
+
+interface ActivityLogEntry {
+  id: string;
+  action: string;
+  meta: Record<string, unknown> | null;
+  createdAt: string;
+  user: { id: string; name: string | null; email: string } | null;
 }
 
 const TABS = [
   { id: "records", label: "수집 데이터", icon: Table2 },
   { id: "fields", label: "필드 설정", icon: Settings2 },
   { id: "script", label: "스크립트", icon: Code2 },
+  { id: "settings", label: "보안/알림", icon: Shield },
+  { id: "activity", label: "활동 로그", icon: Activity },
 ] as const;
 
 type Tab = typeof TABS[number]["id"];
@@ -74,7 +106,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
 }
 
 function timeStr(dateStr: string) {
-  return new Date(dateStr).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return formatKst(dateStr, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 function toKey(label: string, index: number) {
@@ -95,6 +127,35 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
   const [records, setRecords] = useState<CollectRecord[]>([]);
   const [recordsTotal, setRecordsTotal] = useState(0);
   const [recordsLoading, setRecordsLoading] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [showCleanup, setShowCleanup] = useState(false);
+  const [showNormalize, setShowNormalize] = useState(false);
+  const [showTest, setShowTest] = useState(false);
+  const [showDangerDelete, setShowDangerDelete] = useState(false);
+  const [detailRecordId, setDetailRecordId] = useState<string | null>(null);
+  const [sort, setSort] = useState<SortState | null>({ kind: "createdAt", dir: "desc" });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+
+  // 검색/필터
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
+  const [filterUtmSource, setFilterUtmSource] = useState("");
+  const [filterUtmMedium, setFilterUtmMedium] = useState("");
+
+  // 설정 폼
+  const [settingsWebhookUrl, setSettingsWebhookUrl] = useState("");
+  const [settingsNotifyOnSubmit, setSettingsNotifyOnSubmit] = useState(false);
+  const [settingsAllowedOrigins, setSettingsAllowedOrigins] = useState("");
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [regeneratingKey, setRegeneratingKey] = useState(false);
+
+  // 활동 로그
+  const [activityLogs, setActivityLogs] = useState<ActivityLogEntry[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
 
   const [fields, setFields] = useState<FieldMapping[]>([]);
   const [isSavingFields, setIsSavingFields] = useState(false);
@@ -117,6 +178,9 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
       setFields(data.source.fieldMappings ?? []);
       setSuccessTrigger(data.source.successTrigger);
       setRedirectUrl(data.source.redirectUrl ?? "");
+      setSettingsWebhookUrl(data.source.webhookUrl ?? "");
+      setSettingsNotifyOnSubmit(!!data.source.notifyOnSubmit);
+      setSettingsAllowedOrigins((data.source.allowedOrigins ?? []).join("\n"));
     } finally {
       setIsLoading(false);
     }
@@ -129,10 +193,139 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
       const data = await res.json();
       setRecords(data.records ?? []);
       setRecordsTotal(data.total ?? 0);
+      setSelectedIds(new Set());
     } finally {
       setRecordsLoading(false);
     }
   }, [id]);
+
+  const toggleSelect = (recordId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(recordId)) next.delete(recordId);
+      else next.add(recordId);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    const pageIds = pagedRecords.map((r) => r.id);
+    const allChecked = pageIds.length > 0 && pageIds.every((rid) => selectedIds.has(rid));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allChecked) pageIds.forEach((rid) => next.delete(rid));
+      else pageIds.forEach((rid) => next.add(rid));
+      return next;
+    });
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`선택한 ${selectedIds.size}건을 삭제할까요? 되돌릴 수 없어요.`)) return;
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`/api/collect-sources/${id}/records`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selectedIds) }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "삭제 실패"); return; }
+      toast.success(`${data.deleted}건 삭제됐어요`);
+      await fetchRecords();
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // 필터/선택이 없으면 서버 export(전체), 있으면 클라이언트에서 필터된 결과 export
+  const handleExportCsv = () => { handleExportCsvWithFilter(); };
+
+  const cycleSort = (kind: SortKind, fieldKey?: string) => {
+    setSort((prev) => {
+      const same = prev && prev.kind === kind && prev.fieldKey === fieldKey;
+      if (!same) return { kind, fieldKey, dir: "asc" };
+      if (prev.dir === "asc") return { kind, fieldKey, dir: "desc" };
+      return null;
+    });
+  };
+
+  const filteredRecords = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const fromTs = filterDateFrom ? new Date(filterDateFrom + "T00:00:00+09:00").getTime() : null;
+    const toTs = filterDateTo ? new Date(filterDateTo + "T23:59:59+09:00").getTime() : null;
+    return records.filter((r) => {
+      if (q) {
+        const haystack = [
+          ...Object.values(r.data ?? {}),
+          r.utmSource, r.utmMedium, r.utmCampaign, r.utmTerm, r.utmContent, r.referrer,
+        ].filter(Boolean).join(" ").toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      if (fromTs || toTs) {
+        const t = new Date(r.createdAt).getTime();
+        if (fromTs && t < fromTs) return false;
+        if (toTs && t > toTs) return false;
+      }
+      if (filterUtmSource && (r.utmSource ?? "") !== filterUtmSource) return false;
+      if (filterUtmMedium && (r.utmMedium ?? "") !== filterUtmMedium) return false;
+      return true;
+    });
+  }, [records, searchQuery, filterDateFrom, filterDateTo, filterUtmSource, filterUtmMedium]);
+
+  const sortedRecords = useMemo(() => {
+    if (!sort) return filteredRecords;
+    const dir = sort.dir === "asc" ? 1 : -1;
+    const getValue = (r: CollectRecord): string | number | null => {
+      if (sort.kind === "createdAt") return new Date(r.createdAt).getTime();
+      if (sort.kind === "utmSource") return r.utmSource ?? "";
+      if (sort.kind === "utmMedium") return r.utmMedium ?? "";
+      return r.data?.[sort.fieldKey ?? ""] ?? "";
+    };
+    return [...filteredRecords].sort((a, b) => {
+      const av = getValue(a);
+      const bv = getValue(b);
+      if (av === null || av === undefined || av === "") return 1;
+      if (bv === null || bv === undefined || bv === "") return -1;
+      if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir;
+      return String(av).localeCompare(String(bv), "ko", { numeric: true }) * dir;
+    });
+  }, [filteredRecords, sort]);
+
+  const utmSourceOptions = useMemo(
+    () => Array.from(new Set(records.map((r) => r.utmSource).filter((v): v is string => !!v))).sort(),
+    [records],
+  );
+  const utmMediumOptions = useMemo(
+    () => Array.from(new Set(records.map((r) => r.utmMedium).filter((v): v is string => !!v))).sort(),
+    [records],
+  );
+
+  const hasActiveFilter = !!(searchQuery || filterDateFrom || filterDateTo || filterUtmSource || filterUtmMedium);
+  const resetFilters = () => {
+    setSearchQuery(""); setFilterDateFrom(""); setFilterDateTo("");
+    setFilterUtmSource(""); setFilterUtmMedium("");
+  };
+
+  const totalPages = Math.max(1, Math.ceil(sortedRecords.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pageStart = (safePage - 1) * pageSize;
+  const pageEnd = pageStart + pageSize;
+  const pagedRecords = useMemo(
+    () => sortedRecords.slice(pageStart, pageEnd),
+    [sortedRecords, pageStart, pageEnd],
+  );
+
+  // 정렬/페이지 크기/필터 변경 시 1페이지로
+  useEffect(() => { setPage(1); }, [sort, pageSize, recordsTotal, searchQuery, filterDateFrom, filterDateTo, filterUtmSource, filterUtmMedium]);
+
+  const sortIcon = (kind: SortKind, fieldKey?: string) => {
+    const active = sort && sort.kind === kind && sort.fieldKey === fieldKey;
+    if (!active) return <ChevronsUpDown className="w-3 h-3 text-muted-foreground/40" />;
+    return sort.dir === "asc"
+      ? <ArrowUp className="w-3 h-3 text-violet-500" />
+      : <ArrowDown className="w-3 h-3 text-violet-500" />;
+  };
 
   const fetchScript = useCallback(async () => {
     setScriptLoading(true);
@@ -145,9 +338,98 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
     }
   }, [id]);
 
+  const fetchActivity = useCallback(async () => {
+    setActivityLoading(true);
+    try {
+      const res = await fetch(`/api/collect-sources/${id}/activity`);
+      const data = await res.json();
+      setActivityLogs(data.logs ?? []);
+    } finally {
+      setActivityLoading(false);
+    }
+  }, [id]);
+
   useEffect(() => { fetchSource(); }, [fetchSource]);
   useEffect(() => { if (tab === "records") fetchRecords(); }, [tab, fetchRecords]);
   useEffect(() => { if (tab === "script") fetchScript(); }, [tab, fetchScript]);
+  useEffect(() => { if (tab === "activity") fetchActivity(); }, [tab, fetchActivity]);
+
+  const handleSaveSecuritySettings = async () => {
+    setSavingSettings(true);
+    try {
+      const origins = settingsAllowedOrigins
+        .split(/[\n,]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const res = await fetch(`/api/collect-sources/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          webhookUrl: settingsWebhookUrl || null,
+          notifyOnSubmit: settingsNotifyOnSubmit,
+          allowedOrigins: origins,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "저장 실패"); return; }
+      toast.success("저장됐어요");
+      setSource(data.source);
+      setSettingsAllowedOrigins((data.source.allowedOrigins ?? []).join("\n"));
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const handleRegenerateKey = async () => {
+    if (!confirm("API 키를 재발급할까요? 기존 키로 설치된 스크립트는 즉시 동작을 멈춥니다.")) return;
+    setRegeneratingKey(true);
+    try {
+      const res = await fetch(`/api/collect-sources/${id}/regenerate-key`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "재발급 실패"); return; }
+      toast.success("새 키가 발급됐어요. 스크립트를 다시 복사해주세요.");
+      setSource((s) => s ? { ...s, apiKey: data.apiKey } : s);
+      if (tab === "script") fetchScript();
+    } finally {
+      setRegeneratingKey(false);
+    }
+  };
+
+  const handleExportCsvWithFilter = () => {
+    if (!hasActiveFilter && selectedIds.size === 0) {
+      window.location.href = `/api/collect-sources/${id}/records/export`;
+      return;
+    }
+    // 필터/선택된 결과만 클라이언트에서 CSV 생성
+    const targetRecords = selectedIds.size > 0
+      ? records.filter((r) => selectedIds.has(r.id))
+      : sortedRecords;
+    if (!source) return;
+    const csvEscape = (v: unknown) => {
+      if (v === null || v === undefined) return "";
+      const s = String(v);
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const headers = [
+      "시간 (KST)",
+      ...source.fieldMappings.map((f) => f.label || f.key),
+      "UTM 소스", "UTM 매체", "UTM 캠페인", "UTM 키워드", "UTM 콘텐츠", "Referrer",
+    ];
+    const rows = targetRecords.map((r) => [
+      formatKstDateTime(r.createdAt),
+      ...source.fieldMappings.map((f) => r.data?.[f.key] ?? ""),
+      r.utmSource ?? "", r.utmMedium ?? "", r.utmCampaign ?? "",
+      r.utmTerm ?? "", r.utmContent ?? "", r.referrer ?? "",
+    ]);
+    const csv = [headers, ...rows].map((row) => row.map(csvEscape).join(",")).join("\r\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    const date = new Date().toISOString().slice(0, 10);
+    a.download = `${source.name.replace(/[^a-zA-Z0-9가-힣_-]+/g, "_")}_filtered_${date}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
 
   const handleSaveFields = async () => {
     setIsSavingFields(true);
@@ -350,12 +632,126 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
           {/* 수집 데이터 탭 */}
           {tab === "records" && (
             <div>
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-sm text-muted-foreground">총 {recordsTotal.toLocaleString()}건</p>
-                <button onClick={fetchRecords} className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground">
-                  <RefreshCw className="w-3.5 h-3.5" />
-                </button>
+              <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+                <p className="text-sm text-muted-foreground">
+                  {hasActiveFilter
+                    ? <>필터 결과 <span className="text-foreground font-medium">{filteredRecords.length.toLocaleString()}</span> / {recordsTotal.toLocaleString()}건</>
+                    : <>총 {recordsTotal.toLocaleString()}건</>}
+                  {selectedIds.size > 0 && <span className="ml-2 text-violet-500">· {selectedIds.size}건 선택</span>}
+                </p>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {selectedIds.size > 0 && (
+                    <button
+                      onClick={handleDeleteSelected}
+                      disabled={isDeleting}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/5 text-red-500 text-xs font-medium hover:bg-red-500/10 transition-colors disabled:opacity-40"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      {isDeleting ? "삭제 중..." : `선택 삭제`}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowImport(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-violet-400/30 bg-violet-500/5 text-violet-500 text-xs font-medium hover:bg-violet-500/10 transition-colors"
+                  >
+                    <Upload className="w-3.5 h-3.5" />엑셀/CSV 가져오기
+                  </button>
+                  <button
+                    onClick={() => setShowNormalize(true)}
+                    disabled={recordsTotal === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 text-emerald-600 text-xs font-medium hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
+                  >
+                    <Eraser className="w-3.5 h-3.5" />정규화
+                  </button>
+                  <button
+                    onClick={() => setShowCleanup(true)}
+                    disabled={recordsTotal === 0 || source.fieldMappings.length === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/5 text-amber-500 text-xs font-medium hover:bg-amber-500/10 transition-colors disabled:opacity-40"
+                  >
+                    <Wand2 className="w-3.5 h-3.5" />중복 정리
+                  </button>
+                  <button
+                    onClick={handleExportCsv}
+                    disabled={recordsTotal === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium hover:bg-secondary transition-colors disabled:opacity-40"
+                    title={hasActiveFilter || selectedIds.size > 0 ? "필터/선택된 결과만 내보냅니다" : "전체 데이터를 내보냅니다"}
+                  >
+                    <Download className="w-3.5 h-3.5" />CSV 내보내기
+                  </button>
+                  <button onClick={fetchRecords} className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground">
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
+
+              {/* 검색/필터 바 */}
+              {records.length > 0 && (
+                <div className="flex items-center gap-2 mb-3 flex-wrap">
+                  <div className="relative flex-1 min-w-[200px]">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/60" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="이름·이메일·휴대폰 등 모든 필드 검색"
+                      className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+                    />
+                  </div>
+                  <input
+                    type="date"
+                    value={filterDateFrom}
+                    onChange={(e) => setFilterDateFrom(e.target.value)}
+                    className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+                    title="시작일 (KST)"
+                  />
+                  <span className="text-xs text-muted-foreground">~</span>
+                  <input
+                    type="date"
+                    value={filterDateTo}
+                    onChange={(e) => setFilterDateTo(e.target.value)}
+                    className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+                    title="종료일 (KST)"
+                  />
+                  {utmSourceOptions.length > 0 && (
+                    <select
+                      value={filterUtmSource}
+                      onChange={(e) => setFilterUtmSource(e.target.value)}
+                      className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+                    >
+                      <option value="">UTM 소스 전체</option>
+                      {utmSourceOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                  )}
+                  {utmMediumOptions.length > 0 && (
+                    <select
+                      value={filterUtmMedium}
+                      onChange={(e) => setFilterUtmMedium(e.target.value)}
+                      className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+                    >
+                      <option value="">UTM 매체 전체</option>
+                      {utmMediumOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                  )}
+                  {hasActiveFilter && (
+                    <button onClick={resetFilters} className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs text-muted-foreground hover:bg-secondary transition-colors">
+                      <Filter className="w-3 h-3" />필터 해제
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* 필터된 전체 선택 배너 */}
+              {selectedIds.size > 0 && selectedIds.size < filteredRecords.length && pagedRecords.every((r) => selectedIds.has(r.id)) && (
+                <div className="mb-3 px-3 py-2 rounded-lg bg-violet-500/5 border border-violet-400/30 text-xs flex items-center justify-between">
+                  <span>이 페이지의 {pagedRecords.length}건이 선택됐어요.</span>
+                  <button
+                    onClick={() => setSelectedIds(new Set(filteredRecords.map((r) => r.id)))}
+                    className="text-violet-500 font-medium hover:underline"
+                  >
+                    {hasActiveFilter ? `필터된 ${filteredRecords.length}건 전체 선택` : `전체 ${filteredRecords.length}건 선택`}
+                  </button>
+                </div>
+              )}
               {recordsLoading ? (
                 <div className="flex items-center justify-center h-32">
                   <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
@@ -366,22 +762,66 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                   <p className="text-sm text-muted-foreground">아직 수집된 데이터가 없어요</p>
                   <p className="text-xs text-muted-foreground/60 mt-1">스크립트를 설치하면 폼 제출 시 자동으로 수집돼요</p>
                 </div>
+              ) : filteredRecords.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <Filter className="w-8 h-8 text-muted-foreground/20 mb-3" />
+                  <p className="text-sm text-muted-foreground">필터 조건에 맞는 데이터가 없어요</p>
+                  <button onClick={resetFilters} className="text-xs text-violet-500 hover:underline mt-2">필터 해제</button>
+                </div>
               ) : (
                 <div className="overflow-x-auto rounded-2xl border border-border">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border bg-secondary/50">
-                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">시간</th>
+                        <th className="px-3 py-2.5 w-10">
+                          <input
+                            type="checkbox"
+                            checked={pagedRecords.length > 0 && pagedRecords.every((r) => selectedIds.has(r.id))}
+                            onChange={toggleSelectAll}
+                            className="accent-violet-500 cursor-pointer"
+                            aria-label="현재 페이지 모두 선택"
+                          />
+                        </th>
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">
+                          <button onClick={() => cycleSort("createdAt")} className="flex items-center gap-1 hover:text-foreground transition-colors">
+                            시간 {sortIcon("createdAt")}
+                          </button>
+                        </th>
                         {source.fieldMappings.map((f) => (
-                          <th key={f.id} className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">{f.label}</th>
+                          <th key={f.id} className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">
+                            <button onClick={() => cycleSort("field", f.key)} className="flex items-center gap-1 hover:text-foreground transition-colors">
+                              {f.label} {sortIcon("field", f.key)}
+                            </button>
+                          </th>
                         ))}
-                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">UTM 소스</th>
-                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">UTM 매체</th>
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">
+                          <button onClick={() => cycleSort("utmSource")} className="flex items-center gap-1 hover:text-foreground transition-colors">
+                            UTM 소스 {sortIcon("utmSource")}
+                          </button>
+                        </th>
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">
+                          <button onClick={() => cycleSort("utmMedium")} className="flex items-center gap-1 hover:text-foreground transition-colors">
+                            UTM 매체 {sortIcon("utmMedium")}
+                          </button>
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {records.map((record) => (
-                        <tr key={record.id} className="border-b border-border last:border-0 hover:bg-secondary/30 transition-colors">
+                      {pagedRecords.map((record) => (
+                        <tr
+                          key={record.id}
+                          onClick={() => setDetailRecordId(record.id)}
+                          className={`border-b border-border last:border-0 hover:bg-secondary/30 transition-colors cursor-pointer ${selectedIds.has(record.id) ? "bg-violet-500/5" : ""}`}
+                        >
+                          <td className="px-3 py-3 w-10" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(record.id)}
+                              onChange={() => toggleSelect(record.id)}
+                              className="accent-violet-500 cursor-pointer"
+                              aria-label="선택"
+                            />
+                          </td>
                           <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{timeStr(record.createdAt)}</td>
                           {source.fieldMappings.map((f) => (
                             <td key={f.id} className="px-4 py-3 text-xs max-w-[160px] truncate">{record.data[f.key] ?? "-"}</td>
@@ -392,6 +832,62 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                       ))}
                     </tbody>
                   </table>
+                </div>
+              )}
+
+              {!recordsLoading && records.length > 0 && (
+                <div className="flex items-center justify-between gap-3 mt-3 px-1">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span>
+                      {(pageStart + 1).toLocaleString()}–{Math.min(pageEnd, sortedRecords.length).toLocaleString()} / {sortedRecords.length.toLocaleString()}건
+                    </span>
+                    <span className="text-muted-foreground/40">·</span>
+                    <label className="flex items-center gap-1">
+                      페이지당
+                      <select
+                        value={pageSize}
+                        onChange={(e) => setPageSize(parseInt(e.target.value))}
+                        className="px-1.5 py-0.5 rounded border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+                      >
+                        {[25, 50, 100, 200, 500].map((n) => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setPage(1)}
+                      disabled={safePage === 1}
+                      className="px-2 py-1 rounded-lg text-xs text-muted-foreground hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    >
+                      처음
+                    </button>
+                    <button
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      disabled={safePage === 1}
+                      className="p-1 rounded-lg text-muted-foreground hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      aria-label="이전 페이지"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="text-xs text-muted-foreground px-2 tabular-nums">
+                      {safePage} / {totalPages}
+                    </span>
+                    <button
+                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={safePage === totalPages}
+                      className="p-1 rounded-lg text-muted-foreground hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      aria-label="다음 페이지"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setPage(totalPages)}
+                      disabled={safePage === totalPages}
+                      className="px-2 py-1 rounded-lg text-xs text-muted-foreground hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    >
+                      마지막
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -551,9 +1047,17 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
 
               {/* 실제 수집 스크립트 */}
               <div>
-                <div className="mb-3 p-4 rounded-2xl border border-border bg-secondary/30">
-                  <p className="text-sm font-medium mb-1">아임웹 설치</p>
-                  <p className="text-xs text-muted-foreground">관리자 → 사이트 설정 → 사용자 정의 코드 → &lt;/body&gt; 앞에 붙여넣기</p>
+                <div className="mb-3 p-4 rounded-2xl border border-border bg-secondary/30 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium mb-1">아임웹 설치</p>
+                    <p className="text-xs text-muted-foreground">관리자 → 사이트 설정 → 사용자 정의 코드 → &lt;/body&gt; 앞에 붙여넣기</p>
+                  </div>
+                  <button
+                    onClick={() => setShowTest(true)}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-violet-500 text-white text-xs font-medium hover:bg-violet-600 transition-colors shrink-0"
+                  >
+                    <Activity className="w-3.5 h-3.5" />설치 테스트
+                  </button>
                 </div>
                 {scriptLoading ? (
                   <div className="flex items-center justify-center h-32">
@@ -578,8 +1082,288 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
             </div>
           )}
 
+          {/* 보안/알림 탭 */}
+          {tab === "settings" && (
+            <div className="space-y-5 max-w-2xl">
+              {/* API 키 */}
+              <div className="p-4 rounded-2xl border border-border bg-background space-y-3">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-violet-500" />
+                  <h3 className="text-sm font-medium">API 키</h3>
+                </div>
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-secondary border border-border">
+                  <span className="text-xs font-mono truncate flex-1">{source.apiKey}</span>
+                  <CopyButton text={source.apiKey} />
+                </div>
+                <div className="flex items-start gap-2">
+                  <button
+                    onClick={handleRegenerateKey}
+                    disabled={regeneratingKey}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/5 text-red-500 text-xs font-medium hover:bg-red-500/10 transition-colors disabled:opacity-40"
+                  >
+                    {regeneratingKey ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCcw className="w-3.5 h-3.5" />}
+                    키 재발급
+                  </button>
+                  <p className="text-[11px] text-muted-foreground">
+                    키가 유출됐거나 정기 교체할 때 사용하세요. 재발급 시 기존 스크립트는 즉시 동작을 멈추고, 새 키로 다시 설치해야 해요.
+                  </p>
+                </div>
+              </div>
+
+              {/* 허용 Origin */}
+              <div className="p-4 rounded-2xl border border-border bg-background space-y-3">
+                <div className="flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-emerald-500" />
+                  <h3 className="text-sm font-medium">허용 Origin (CORS)</h3>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  비워두면 모든 출처에서 호출 가능합니다. 보안을 위해 실제 폼이 있는 도메인만 허용하세요. 한 줄에 하나씩, 또는 쉼표로 구분.
+                </p>
+                <textarea
+                  value={settingsAllowedOrigins}
+                  onChange={(e) => setSettingsAllowedOrigins(e.target.value)}
+                  placeholder={"https://example.com\nhttps://www.example.com"}
+                  rows={3}
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm font-mono focus:outline-none focus:border-violet-400 resize-none"
+                />
+              </div>
+
+              {/* 알림 */}
+              <div className="p-4 rounded-2xl border border-border bg-background space-y-3">
+                <div className="flex items-center gap-2">
+                  <Bell className="w-4 h-4 text-amber-500" />
+                  <h3 className="text-sm font-medium">새 제출 알림</h3>
+                </div>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settingsNotifyOnSubmit}
+                    onChange={(e) => setSettingsNotifyOnSubmit(e.target.checked)}
+                    className="mt-0.5 accent-violet-500 cursor-pointer"
+                  />
+                  <div>
+                    <p className="text-sm">인앱 알림 켜기</p>
+                    <p className="text-[11px] text-muted-foreground">새 폼 제출이 있을 때 워크스페이스 멤버들에게 알림이 표시돼요</p>
+                  </div>
+                </label>
+              </div>
+
+              {/* 웹훅 */}
+              <div className="p-4 rounded-2xl border border-border bg-background space-y-3">
+                <div className="flex items-center gap-2">
+                  <Webhook className="w-4 h-4 text-blue-500" />
+                  <h3 className="text-sm font-medium">웹훅 URL</h3>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  새 레코드가 수집되면 이 URL로 POST 요청을 보냅니다. Slack incoming webhook, Discord, Zapier 등에 연결할 수 있어요.
+                </p>
+                <input
+                  type="url"
+                  value={settingsWebhookUrl}
+                  onChange={(e) => setSettingsWebhookUrl(e.target.value)}
+                  placeholder="https://hooks.slack.com/services/..."
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm font-mono focus:outline-none focus:border-violet-400"
+                />
+                <details className="text-[11px] text-muted-foreground">
+                  <summary className="cursor-pointer hover:text-foreground">전송되는 페이로드 형식</summary>
+                  <pre className="mt-2 p-2 rounded-lg bg-secondary border border-border overflow-x-auto">{`{
+  "event": "record.created",
+  "sourceId": "...",
+  "sourceName": "...",
+  "recordId": "...",
+  "data": { ... },
+  "utm": { "utmSource": "...", ... },
+  "createdAt": "ISO 8601"
+}`}</pre>
+                </details>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  onClick={handleSaveSecuritySettings}
+                  disabled={savingSettings}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
+                >
+                  {savingSettings ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  설정 저장
+                </button>
+              </div>
+
+              {/* 위험 영역 */}
+              <div className="p-4 rounded-2xl border-2 border-red-500/30 bg-red-500/5 space-y-3 mt-8">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-500" />
+                  <h3 className="text-sm font-semibold text-red-600 dark:text-red-400">위험 영역</h3>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">모든 수집 레코드 삭제</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      이 소스에 수집된 모든 데이터({recordsTotal.toLocaleString()}건)를 영구 삭제합니다. 되돌릴 수 없어요.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowDangerDelete(true)}
+                    disabled={recordsTotal === 0}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400 text-xs font-medium hover:bg-red-500/20 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />전체 삭제
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 활동 로그 탭 */}
+          {tab === "activity" && (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm text-muted-foreground">최근 활동 {activityLogs.length}건</p>
+                <button onClick={fetchActivity} className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground">
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              {activityLoading ? (
+                <div className="flex items-center justify-center h-32"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+              ) : activityLogs.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <Activity className="w-8 h-8 text-muted-foreground/20 mb-3" />
+                  <p className="text-sm text-muted-foreground">기록된 활동이 없어요</p>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {activityLogs.map((log) => (
+                    <ActivityRow key={log.id} log={log} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
         </motion.div>
       </AnimatePresence>
+
+      {showImport && (
+        <ImportModal
+          sourceId={id}
+          fieldMappings={source.fieldMappings}
+          onClose={() => setShowImport(false)}
+          onImported={() => { fetchRecords(); fetchSource(); }}
+        />
+      )}
+
+      {showCleanup && (
+        <CleanupModal
+          sourceId={id}
+          fieldMappings={source.fieldMappings}
+          onClose={() => setShowCleanup(false)}
+          onCleaned={() => { fetchRecords(); fetchSource(); }}
+        />
+      )}
+
+      {showNormalize && (
+        <NormalizeModal
+          sourceId={id}
+          fieldMappings={source.fieldMappings}
+          onClose={() => setShowNormalize(false)}
+          onApplied={() => { fetchRecords(); }}
+        />
+      )}
+
+      {showTest && (
+        <TestModal
+          sourceId={id}
+          siteUrl={source.siteUrl}
+          fieldMappings={source.fieldMappings}
+          onClose={() => setShowTest(false)}
+          onRecordReceived={() => { fetchRecords(); }}
+        />
+      )}
+
+      {showDangerDelete && (
+        <DangerDeleteModal
+          sourceId={id}
+          sourceName={source.name}
+          recordCount={recordsTotal}
+          onClose={() => setShowDangerDelete(false)}
+          onDeleted={() => { fetchRecords(); fetchSource(); }}
+        />
+      )}
+
+      {detailRecordId && (
+        <RecordDetailModal
+          sourceId={id}
+          recordId={detailRecordId}
+          fieldMappings={source.fieldMappings}
+          onClose={() => setDetailRecordId(null)}
+          onChanged={() => { fetchRecords(); }}
+        />
+      )}
     </div>
   );
+}
+
+// ── 활동 로그 행 ──────────────────────────────────────
+function ActivityRow({ log }: { log: ActivityLogEntry }) {
+  const { label, color } = activityLabel(log.action);
+  const meta = log.meta ?? {};
+  const summary = activitySummary(log.action, meta);
+  return (
+    <div className="flex items-start gap-3 px-3 py-2.5 rounded-xl border border-border bg-background">
+      <div className={`w-1.5 h-1.5 rounded-full mt-2 shrink-0 ${color}`} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-baseline gap-2 flex-wrap">
+          <p className="text-sm font-medium">{label}</p>
+          {summary && <p className="text-xs text-muted-foreground">{summary}</p>}
+        </div>
+        <p className="text-[11px] text-muted-foreground mt-0.5">
+          {formatKstDateTime(log.createdAt)} KST
+          {log.user && <> · {log.user.name ?? log.user.email}</>}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function activityLabel(action: string): { label: string; color: string } {
+  switch (action) {
+    case "source.created":         return { label: "소스 생성",         color: "bg-emerald-500" };
+    case "source.updated":         return { label: "소스 설정 변경",     color: "bg-blue-500" };
+    case "source.deleted":         return { label: "소스 삭제",         color: "bg-red-500" };
+    case "source.key_regenerated": return { label: "API 키 재발급",      color: "bg-amber-500" };
+    case "record.created":         return { label: "레코드 생성",        color: "bg-emerald-500" };
+    case "record.updated":         return { label: "레코드 편집",        color: "bg-blue-500" };
+    case "record.deleted":         return { label: "레코드 삭제",        color: "bg-red-500" };
+    case "records.bulk_deleted":   return { label: "레코드 일괄 삭제",   color: "bg-red-500" };
+    case "records.imported":       return { label: "데이터 가져오기",    color: "bg-violet-500" };
+    case "records.cleaned":        return { label: "중복 정리",          color: "bg-amber-500" };
+    case "records.normalized":     return { label: "데이터 정규화",      color: "bg-emerald-500" };
+    default:                       return { label: action,              color: "bg-muted-foreground/40" };
+  }
+}
+
+function activitySummary(action: string, meta: Record<string, unknown>): string {
+  if (action === "records.imported") {
+    const parts: string[] = [];
+    if (typeof meta.imported === "number") parts.push(`신규 ${meta.imported}`);
+    if (typeof meta.updated === "number" && meta.updated > 0) parts.push(`업데이트 ${meta.updated}`);
+    if (typeof meta.skipped === "number" && meta.skipped > 0) parts.push(`스킵 ${meta.skipped}`);
+    return parts.join(" · ");
+  }
+  if (action === "records.bulk_deleted" && typeof meta.count === "number") {
+    return `${meta.count}건`;
+  }
+  if (action === "records.cleaned" && typeof meta.deleted === "number") {
+    return `${meta.deleted}건 정리 (${String(meta.keyField ?? "")} 기준)`;
+  }
+  if (action === "records.normalized" && typeof meta.changedRows === "number") {
+    return `${meta.changedRows}건 수정`;
+  }
+  if (action === "source.updated" && Array.isArray(meta.fields)) {
+    return `${(meta.fields as string[]).join(", ")}`;
+  }
+  if ((action === "source.created" || action === "source.deleted") && typeof meta.name === "string") {
+    return meta.name;
+  }
+  return "";
 }

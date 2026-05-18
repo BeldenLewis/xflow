@@ -21,6 +21,7 @@ model User {
   notifications       Notification[]
   sentInvitations     WorkspaceInvitation[] @relation("InvitedBy")
   receivedInvitations WorkspaceInvitation[] @relation("InvitedUser")
+  activityLogs        ActivityLog[] @relation("ActivityActor")
 }
 
 model Workspace {
@@ -38,6 +39,7 @@ model Workspace {
   invitations    WorkspaceInvitation[]
   collectSources CollectSource[]
   collectRecords CollectRecord[]
+  activityLogs   ActivityLog[]
 }
 
 model WorkspaceMember {
@@ -140,13 +142,17 @@ model CollectSource {
   redirectUrl    String?
   isActive         Boolean  @default(true)
   discoveredFields Json?
+  webhookUrl       String?
+  notifyOnSubmit   Boolean  @default(false)
+  allowedOrigins   String[] @default([])
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project       Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   fieldMappings FieldMapping[]
   records       CollectRecord[]
+  activityLogs  ActivityLog[]
 }
 
 model FieldMapping {
@@ -185,6 +191,25 @@ model CollectRecord {
   source    CollectSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   project   Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([sourceId, createdAt(sort: Desc)])
+}
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+  workspaceId String
+  sourceId    String?
+  userId      String?
+  action      String   // "source.created" | "source.deleted" | "key.regenerated" | "record.deleted" | "record.updated" | "records.imported" | "records.cleaned" | "records.normalized" | "records.bulk_deleted"
+  meta        Json?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  source    CollectSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  user      User?          @relation("ActivityActor", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([sourceId, createdAt(sort: Desc)])
 }
 
 model UTMLink {

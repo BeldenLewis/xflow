@@ -1,6 +1,19 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
+
+function normalizeOriginInput(s: unknown): string | null {
+  if (typeof s !== "string") return null;
+  const trimmed = s.trim();
+  if (!trimmed) return null;
+  try {
+    const u = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return null;
+  }
+}
 
 async function getSourceWithAuth(id: string, userId: string, requireAdmin = false) {
   const source = await prisma.collectSource.findUnique({ where: { id } });
@@ -45,7 +58,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if ("error" in result) return NextResponse.json({ error: result.error }, { status: result.status });
 
   const body = await request.json();
-  const { name, description, siteUrl, successTrigger, redirectUrl, isActive } = body;
+  const {
+    name, description, siteUrl, successTrigger, redirectUrl, isActive,
+    webhookUrl, notifyOnSubmit, allowedOrigins,
+  } = body;
+
+  let normalizedAllowed: string[] | undefined;
+  if (Array.isArray(allowedOrigins)) {
+    normalizedAllowed = allowedOrigins
+      .map((o) => normalizeOriginInput(o))
+      .filter((o): o is string => !!o);
+    // 중복 제거
+    normalizedAllowed = Array.from(new Set(normalizedAllowed));
+  }
 
   const source = await prisma.collectSource.update({
     where: { id },
@@ -56,8 +81,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       ...(successTrigger !== undefined && { successTrigger }),
       ...(redirectUrl !== undefined && { redirectUrl: redirectUrl || null }),
       ...(isActive !== undefined && { isActive }),
+      ...(webhookUrl !== undefined && { webhookUrl: webhookUrl || null }),
+      ...(notifyOnSubmit !== undefined && { notifyOnSubmit: !!notifyOnSubmit }),
+      ...(normalizedAllowed !== undefined && { allowedOrigins: normalizedAllowed }),
     },
     include: { fieldMappings: { orderBy: { sortOrder: "asc" } } },
+  });
+
+  await logActivity({
+    workspaceId: source.workspaceId,
+    sourceId: source.id,
+    userId: user.id,
+    action: "source.updated",
+    meta: { fields: Object.keys(body) },
   });
 
   return NextResponse.json({ source });
@@ -72,7 +108,17 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const result = await getSourceWithAuth(id, user.id, true);
   if ("error" in result) return NextResponse.json({ error: result.error }, { status: result.status });
 
+  const wsId = result.source.workspaceId;
+  const srcName = result.source.name;
   await prisma.collectSource.delete({ where: { id } });
+
+  await logActivity({
+    workspaceId: wsId,
+    sourceId: null,
+    userId: user.id,
+    action: "source.deleted",
+    meta: { name: srcName, sourceId: id },
+  });
 
   return NextResponse.json({ ok: true });
 }

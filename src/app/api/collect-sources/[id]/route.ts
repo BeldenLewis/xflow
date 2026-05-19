@@ -110,15 +110,19 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
   const wsId = result.source.workspaceId;
   const srcName = result.source.name;
-  await prisma.collectSource.delete({ where: { id } });
+  // Soft delete: 30일 동안 복구 가능, 그 후 cron 으로 영구 제거
+  await prisma.collectSource.update({
+    where: { id },
+    data: { deletedAt: new Date(), isActive: false },
+  });
 
   await logActivity({
     workspaceId: wsId,
     sourceId: null,
     userId: user.id,
     action: "source.deleted",
-    meta: { name: srcName, sourceId: id },
+    meta: { name: srcName, sourceId: id, softDelete: true },
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, softDeleted: true });
 }

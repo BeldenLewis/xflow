@@ -22,14 +22,18 @@ model User {
   sentInvitations     WorkspaceInvitation[] @relation("InvitedBy")
   receivedInvitations WorkspaceInvitation[] @relation("InvitedUser")
   activityLogs        ActivityLog[] @relation("ActivityActor")
+  apiTokens           ApiToken[]
+  notificationPrefs   NotificationPref[]
+  projectMemberships  ProjectMember[]
 }
 
 model Workspace {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   name      String
-  slug      String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  slug      String    @unique
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   members        WorkspaceMember[]
   projects       Project[]
@@ -43,6 +47,7 @@ model Workspace {
   dashboardWidgets DashboardWidget[]
   dashboards       Dashboard[]
   scheduledReports ScheduledReport[]
+  apiTokens        ApiToken[]
 }
 
 model WorkspaceMember {
@@ -67,17 +72,20 @@ enum Role {
 model WorkspaceInvitation {
   id            String   @id @default(cuid())
   workspaceId   String
-  invitedUserId String
+  invitedUserId String?  // null 이면 미가입자 이메일 초대
+  invitedEmail  String?  // 이메일 기반 초대 시 사용 (가입 시 매칭)
   invitedById   String
   role          Role     @default(MEMBER)
   status        String   @default("PENDING") // PENDING | ACCEPTED | DECLINED
+  token         String?  @unique // 이메일 링크용 — null 이면 인앱 초대
   createdAt     DateTime @default(now())
 
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  invitedUser User      @relation("InvitedUser", fields: [invitedUserId], references: [id], onDelete: Cascade)
+  invitedUser User?     @relation("InvitedUser", fields: [invitedUserId], references: [id], onDelete: Cascade)
   invitedBy   User      @relation("InvitedBy", fields: [invitedById], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, invitedUserId])
+  @@index([invitedEmail, status])
 }
 
 model Notification {
@@ -92,12 +100,13 @@ model Notification {
 }
 
 model Project {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   name        String
   description String?
   workspaceId String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   utmLinks         UTMLink[]
@@ -105,6 +114,7 @@ model Project {
   collectRecords   CollectRecord[]
   dashboardWidgets DashboardWidget[]
   dashboards       Dashboard[]
+  projectMembers   ProjectMember[]
 }
 
 model UTMPreset {
@@ -145,13 +155,14 @@ model CollectSource {
   siteUrl        String?
   successTrigger String   @default("정상적으로 접수되었습니다")
   redirectUrl    String?
-  isActive         Boolean  @default(true)
+  isActive         Boolean   @default(true)
   discoveredFields Json?
   webhookUrl       String?
-  notifyOnSubmit   Boolean  @default(false)
-  allowedOrigins   String[] @default([])
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  notifyOnSubmit   Boolean   @default(false)
+  allowedOrigins   String[]  @default([])
+  deletedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   project       Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
   workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -286,6 +297,63 @@ model ScheduledReport {
 
   @@index([nextRunAt])
   @@index([dashboardId])
+}
+
+// 데이터 자동 보관 정책 (GDPR/개인정보 자동 삭제)
+// 소스 단위로 N일 지난 레코드 자동 제거
+model CollectRetentionPolicy {
+  sourceId   String   @id
+  retainDays Int      // 0 = 영구 보관
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// 워크스페이스 단위 API 토큰 (외부 도구 연동)
+model ApiToken {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String    // 발급한 사용자
+  name        String    // 사용자 지정 라벨 (예: "Zapier 연동")
+  tokenHash   String    @unique // SHA-256 hash of token
+  prefix      String    // 토큰 앞 8자 (식별용 — 평문 토큰은 발급 직후 한 번만 표시)
+  scopes      String[]  @default([]) // ["records:read", "records:write", "dashboards:read"]
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+// 사용자 알림 환경설정 (어떤 이벤트의 인앱 알림을 받을지)
+model NotificationPref {
+  id        String   @id @default(cuid())
+  userId    String
+  eventType String   // "WORKSPACE_INVITE" | "COLLECT_SUBMITTED" | "REPORT_SENT" | "ROLE_CHANGED" 등
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventType])
+}
+
+// 프로젝트 단위 권한 (워크스페이스 권한 위에 덮어쓰기)
+// 없으면 워크스페이스 권한이 그대로 적용됨.
+model ProjectMember {
+  id        String   @id @default(cuid())
+  userId    String
+  projectId String
+  role      String   // "VIEWER" | "EDITOR" | "ADMIN"
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, projectId])
 }
 
 model UTMLink {

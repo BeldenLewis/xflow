@@ -160,47 +160,45 @@ export async function POST(request: Request) {
 
     case "time_series": {
       const granularity = (getStringConfig(config ?? {}, "granularity") ?? "day") as "hour" | "day" | "week";
-      const records = await prisma.collectRecord.findMany({
-        where, select: { createdAt: true }, orderBy: { createdAt: "asc" },
-      });
-      const points = bucketize(records.map((r) => r.createdAt), granularity, from, to);
+      // Postgres date_trunc 로 직접 버킷 집계 (메모리 부담 ↓)
+      const bucketed = await groupByTimeBucket(where as Record<string, unknown>, granularity);
+      const points = fillMissingBuckets(bucketed, granularity, from, to);
       let prevPoints: { date: string; count: number }[] | null = null;
       if (config?.compareWithPrevious) {
         const span = to.getTime() - from.getTime();
         const prevFrom = new Date(from.getTime() - span);
         const prevTo = from;
         const prevWhere = { ...where, createdAt: { gte: prevFrom, lt: prevTo } };
-        const prevRecords = await prisma.collectRecord.findMany({
-          where: prevWhere, select: { createdAt: true }, orderBy: { createdAt: "asc" },
-        });
-        // 이전 기간을 현재 기간 라벨에 매핑 (시각화 위해 같은 x축 사용)
-        prevPoints = bucketize(prevRecords.map((r) => new Date(r.createdAt.getTime() + span)), granularity, from, to);
+        const prevBucketed = await groupByTimeBucket(prevWhere, granularity);
+        // 이전 버킷 키를 현재 기간 라벨로 shift
+        const shifted = prevBucketed.map((p) => ({ date: shiftBucket(p.date, span, granularity), count: p.count }));
+        prevPoints = fillMissingBuckets(shifted, granularity, from, to);
       }
       return respond({ points, prevPoints, granularity });
     }
 
     case "utm_breakdown": {
       const dimension = (getStringConfig(config ?? {}, "dimension") ?? "utmSource") as string;
-      // 허용된 컬럼만 query 에 사용
       const ALLOWED = new Set([
         "utmSource", "utmMedium", "utmCampaign", "utmTerm", "utmContent",
         "firstUtmSource", "firstUtmMedium", "firstUtmCampaign", "firstUtmTerm", "firstUtmContent",
       ]);
       const safeDim = ALLOWED.has(dimension) ? dimension : "utmSource";
-      const records = await prisma.collectRecord.findMany({
-        where,
-        select: { [safeDim]: true } as never,
-      }) as unknown as Array<Record<string, string | null>>;
 
-      const counts = new Map<string, number>();
-      for (const r of records) {
-        const v = (r[safeDim] ?? "").trim() || "(없음)";
-        counts.set(v, (counts.get(v) ?? 0) + 1);
-      }
-      const total = records.length;
-      const items = Array.from(counts.entries())
-        .map(([key, count]) => ({ key, count, percent: total > 0 ? (count / total) * 100 : 0 }))
-        .sort((a, b) => b.count - a.count);
+      // Postgres GROUP BY 로 집계 (메모리 사용 최소화)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const groups = await (prisma.collectRecord.groupBy as any)({
+        by: [safeDim],
+        where,
+        _count: { _all: true },
+      }) as Array<Record<string, unknown> & { _count: { _all: number } }>;
+
+      const total = groups.reduce((s, g) => s + g._count._all, 0);
+      const items = groups.map((g) => {
+        const raw = g[safeDim];
+        const key = (typeof raw === "string" && raw.trim()) ? raw : "(없음)";
+        return { key, count: g._count._all, percent: total > 0 ? (g._count._all / total) * 100 : 0 };
+      });
       return respond({ items, total });
     }
 
@@ -358,16 +356,24 @@ export async function POST(request: Request) {
       if (stages.length === 0) {
         return NextResponse.json({ stages: [], error: "단계 설정 필요" });
       }
-      const results = await Promise.all(stages.map(async (sourceId) => {
-        const count = await prisma.collectRecord.count({
-          where: {
-            projectId,
-            sourceId,
-            createdAt: { gte: from, lte: to },
-          },
-        });
-        const source = await prisma.collectSource.findUnique({ where: { id: sourceId }, select: { name: true } });
-        return { sourceId, name: source?.name ?? sourceId, count };
+      // N+1 → 2 쿼리: 카운트 한 번 + 소스 이름 한 번
+      const [counts, sources] = await Promise.all([
+        prisma.collectRecord.groupBy({
+          by: ["sourceId"],
+          where: { sourceId: { in: stages }, projectId, createdAt: { gte: from, lte: to } },
+          _count: { _all: true },
+        }),
+        prisma.collectSource.findMany({
+          where: { id: { in: stages } },
+          select: { id: true, name: true },
+        }),
+      ]);
+      const countMap = new Map(counts.map((c) => [c.sourceId, c._count._all]));
+      const nameMap = new Map(sources.map((s) => [s.id, s.name]));
+      const results = stages.map((sourceId) => ({
+        sourceId,
+        name: nameMap.get(sourceId) ?? sourceId,
+        count: countMap.get(sourceId) ?? 0,
       }));
       const top = results[0]?.count ?? 0;
       const enriched = results.map((r, i) => ({
@@ -454,7 +460,85 @@ export async function POST(request: Request) {
   }
 }
 
-// 시계열 버킷화: KST 기준 day/hour/week 로 그룹핑
+// Postgres 에서 date_trunc 로 직접 버킷 집계 — 메모리 사용 ↓, 인덱스 활용
+async function groupByTimeBucket(
+  where: Record<string, unknown>,
+  granularity: "hour" | "day" | "week",
+): Promise<{ date: string; count: number }[]> {
+  const trunc = granularity === "hour" ? "hour" : granularity === "week" ? "week" : "day";
+  const w = where as { projectId?: string; sourceId?: string; createdAt?: { gte?: Date; lte?: Date } };
+  const rows = await prisma.$queryRaw<{ bucket: Date; count: bigint }[]>`
+    SELECT date_trunc(${trunc}::text, "createdAt" AT TIME ZONE 'Asia/Seoul') AS bucket,
+           COUNT(*)::bigint AS count
+    FROM "CollectRecord"
+    WHERE "projectId" = ${w.projectId}
+      ${w.sourceId ? prismaSqlAnd(`"sourceId" = '${w.sourceId}'`) : prismaSqlEmpty()}
+      AND "createdAt" >= ${w.createdAt?.gte ?? new Date(0)}
+      AND "createdAt" <= ${w.createdAt?.lte ?? new Date()}
+    GROUP BY bucket
+    ORDER BY bucket ASC
+  `;
+  return rows.map((r) => ({
+    date: formatBucket(r.bucket, granularity),
+    count: Number(r.count),
+  }));
+}
+
+import { Prisma } from "@/generated/prisma";
+function prismaSqlAnd(s: string) { return Prisma.sql`AND ${Prisma.raw(s)}`; }
+function prismaSqlEmpty() { return Prisma.empty; }
+
+function formatBucket(d: Date, g: "hour" | "day" | "week"): string {
+  // date_trunc 결과는 UTC date. KST 라벨로 포맷.
+  // AT TIME ZONE 'Asia/Seoul' 결과를 UTC 로 받아옴 → KST 시각으로 해석하려면 +9시간 보정.
+  const kst = new Date(d.getTime());
+  const y = kst.getUTCFullYear();
+  const m = String(kst.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(kst.getUTCDate()).padStart(2, "0");
+  if (g === "hour") {
+    const h = String(kst.getUTCHours()).padStart(2, "0");
+    return `${y}-${m}-${day} ${h}:00`;
+  }
+  return `${y}-${m}-${day}`;
+}
+
+function fillMissingBuckets(
+  points: { date: string; count: number }[],
+  granularity: "hour" | "day" | "week",
+  from: Date,
+  to: Date,
+): { date: string; count: number }[] {
+  const KST = 9 * 60 * 60_000;
+  const out = new Map<string, number>();
+  const step = granularity === "hour" ? 3600_000 : granularity === "week" ? 7 * 86400_000 : 86400_000;
+  for (let t = from.getTime(); t <= to.getTime(); t += step) {
+    const kst = new Date(t + KST);
+    const y = kst.getUTCFullYear();
+    const m = String(kst.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(kst.getUTCDate()).padStart(2, "0");
+    const key = granularity === "hour"
+      ? `${y}-${m}-${d} ${String(kst.getUTCHours()).padStart(2, "0")}:00`
+      : `${y}-${m}-${d}`;
+    out.set(key, 0);
+  }
+  for (const p of points) out.set(p.date, (out.get(p.date) ?? 0) + p.count);
+  return Array.from(out.entries()).map(([date, count]) => ({ date, count })).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function shiftBucket(date: string, spanMs: number, granularity: "hour" | "day" | "week"): string {
+  const [datePart, timePart] = date.split(" ");
+  const [y, m, d] = datePart.split("-").map(Number);
+  const h = timePart ? parseInt(timePart.split(":")[0]) : 0;
+  const t = Date.UTC(y, m - 1, d, h) + spanMs;
+  const dt = new Date(t);
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getUTCDate()).padStart(2, "0");
+  if (granularity === "hour") return `${yy}-${mm}-${dd} ${String(dt.getUTCHours()).padStart(2, "0")}:00`;
+  return `${yy}-${mm}-${dd}`;
+}
+
+// (legacy) 시계열 버킷화 — JS 메모리 처리. 작은 데이터셋용으로 유지.
 function bucketize(dates: Date[], granularity: "hour" | "day" | "week", from: Date, to: Date) {
   const KST_OFFSET = 9 * 60 * 60_000;
   const buckets = new Map<string, number>();

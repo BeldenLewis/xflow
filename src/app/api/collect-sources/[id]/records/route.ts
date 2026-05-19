@@ -29,18 +29,72 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const rawLimit = parseInt(searchParams.get("limit") ?? "10000");
   const limit = Math.min(Math.max(rawLimit, 1), 10000);
   const skip = (page - 1) * limit;
+  const q = searchParams.get("q")?.trim();
+  const utmSource = searchParams.get("utmSource");
+  const utmMedium = searchParams.get("utmMedium");
+  const from = searchParams.get("from");
+  const to = searchParams.get("to");
 
-  const [records, total] = await prisma.$transaction([
-    prisma.collectRecord.findMany({
-      where: { sourceId: id },
-      orderBy: { createdAt: "desc" },
-      skip,
-      take: limit,
-    }),
-    prisma.collectRecord.count({ where: { sourceId: id } }),
-  ]);
+  // Postgres JSONB ::text 캐스팅으로 모든 필드값에서 ILIKE 검색
+  // 큰 데이터셋에서도 일관된 응답 시간 (인덱스 활용 어렵지만 정확성 우선)
+  const where: Record<string, unknown> = { sourceId: id };
+  if (utmSource) where.utmSource = utmSource;
+  if (utmMedium) where.utmMedium = utmMedium;
+  if (from || to) {
+    const range: Record<string, Date> = {};
+    if (from) range.gte = new Date(from);
+    if (to) range.lte = new Date(to);
+    where.createdAt = range;
+  }
 
-  return NextResponse.json({ records, total, page, limit });
+  let records, total;
+  if (q) {
+    // 검색은 raw SQL 로 JSONB 텍스트 검색 + utm 필드
+    const escaped = q.replace(/[%_\\]/g, (m) => "\\" + m);
+    const pattern = `%${escaped}%`;
+    const fromDate = from ? new Date(from) : new Date(0);
+    const toDate = to ? new Date(to) : new Date();
+    const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM "CollectRecord"
+      WHERE "sourceId" = ${id}
+        AND "createdAt" >= ${fromDate}
+        AND "createdAt" <= ${toDate}
+        AND (
+          "data"::text ILIKE ${pattern}
+          OR COALESCE("utmSource",'') ILIKE ${pattern}
+          OR COALESCE("utmMedium",'') ILIKE ${pattern}
+          OR COALESCE("utmCampaign",'') ILIKE ${pattern}
+          OR COALESCE("referrer",'') ILIKE ${pattern}
+        )
+      ORDER BY "createdAt" DESC
+      LIMIT ${limit} OFFSET ${skip}
+    `;
+    const ids = rows.map((r) => r.id);
+    records = await prisma.collectRecord.findMany({ where: { id: { in: ids } }, orderBy: { createdAt: "desc" } });
+    const countRow = await prisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(*)::bigint AS count FROM "CollectRecord"
+      WHERE "sourceId" = ${id}
+        AND "createdAt" >= ${fromDate}
+        AND "createdAt" <= ${toDate}
+        AND (
+          "data"::text ILIKE ${pattern}
+          OR COALESCE("utmSource",'') ILIKE ${pattern}
+          OR COALESCE("utmMedium",'') ILIKE ${pattern}
+          OR COALESCE("utmCampaign",'') ILIKE ${pattern}
+          OR COALESCE("referrer",'') ILIKE ${pattern}
+        )
+    `;
+    total = Number(countRow[0]?.count ?? 0);
+  } else {
+    const [r, t] = await prisma.$transaction([
+      prisma.collectRecord.findMany({ where, orderBy: { createdAt: "desc" }, skip, take: limit }),
+      prisma.collectRecord.count({ where }),
+    ]);
+    records = r;
+    total = t;
+  }
+
+  return NextResponse.json({ records, total, page, limit, q });
 }
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {

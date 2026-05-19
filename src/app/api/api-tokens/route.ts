@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
-import { logActivity } from "@/lib/activity";
+import { generateToken } from "@/lib/pat";
 
 export async function GET(request: Request) {
   const supabase = await createClient();
@@ -9,9 +9,7 @@ export async function GET(request: Request) {
   if (!user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
   const { searchParams } = new URL(request.url);
-  const projectId = searchParams.get("projectId");
   const workspaceId = searchParams.get("workspaceId");
-
   if (!workspaceId) return NextResponse.json({ error: "workspaceId 필요" }, { status: 400 });
 
   const membership = await prisma.workspaceMember.findUnique({
@@ -19,16 +17,12 @@ export async function GET(request: Request) {
   });
   if (!membership) return NextResponse.json({ error: "접근 권한 없음" }, { status: 403 });
 
-  const sources = await prisma.collectSource.findMany({
-    where: { workspaceId, ...(projectId ? { projectId } : {}), deletedAt: null },
-    include: {
-      _count: { select: { records: true } },
-      fieldMappings: { orderBy: { sortOrder: "asc" } },
-    },
+  const tokens = await prisma.apiToken.findMany({
+    where: { workspaceId },
+    select: { id: true, name: true, prefix: true, scopes: true, lastUsedAt: true, expiresAt: true, createdAt: true, userId: true },
     orderBy: { createdAt: "desc" },
   });
-
-  return NextResponse.json({ sources });
+  return NextResponse.json({ tokens });
 }
 
 export async function POST(request: Request) {
@@ -37,39 +31,34 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
   const body = await request.json();
-  const { workspaceId, projectId, name, description, siteUrl, successTrigger, redirectUrl } = body;
-
-  if (!workspaceId || !projectId || !name) {
-    return NextResponse.json({ error: "필수 항목 누락" }, { status: 400 });
-  }
+  const { workspaceId, name, scopes, expiresInDays } = body as { workspaceId?: string; name?: string; scopes?: string[]; expiresInDays?: number };
+  if (!workspaceId || !name) return NextResponse.json({ error: "workspaceId, name 필요" }, { status: 400 });
 
   const membership = await prisma.workspaceMember.findUnique({
     where: { userId_workspaceId: { userId: user.id, workspaceId } },
   });
   if (!membership || membership.role === "MEMBER") {
-    return NextResponse.json({ error: "권한 없음" }, { status: 403 });
+    return NextResponse.json({ error: "ADMIN 이상 필요" }, { status: 403 });
   }
 
-  const source = await prisma.collectSource.create({
+  const { token, tokenHash, prefix } = generateToken();
+  const expiresAt = expiresInDays ? new Date(Date.now() + expiresInDays * 86400_000) : null;
+
+  const created = await prisma.apiToken.create({
     data: {
       workspaceId,
-      projectId,
-      name,
-      description: description || null,
-      siteUrl: siteUrl || null,
-      successTrigger: successTrigger || "정상적으로 접수되었습니다",
-      redirectUrl: redirectUrl || null,
+      userId: user.id,
+      name: name.trim(),
+      tokenHash,
+      prefix,
+      scopes: Array.isArray(scopes) ? scopes : [],
+      expiresAt,
     },
-    include: { fieldMappings: true },
   });
 
-  await logActivity({
-    workspaceId,
-    sourceId: source.id,
-    userId: user.id,
-    action: "source.created",
-    meta: { name: source.name },
+  // token 평문은 응답에만 — DB 에는 저장 안 됨
+  return NextResponse.json({
+    token: { id: created.id, prefix, name: created.name, scopes: created.scopes, expiresAt: created.expiresAt },
+    accessToken: token,
   });
-
-  return NextResponse.json({ source }, { status: 201 });
 }

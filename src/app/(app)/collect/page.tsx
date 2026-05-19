@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Database, Globe, ToggleLeft, ToggleRight, Loader2, ChevronRight, Users, Trash2 } from "lucide-react";
+import { Plus, Database, Globe, ToggleLeft, ToggleRight, Loader2, ChevronRight, Users, Trash2, Upload, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/contexts/workspace";
 import Link from "next/link";
+import ProjectMembersModal from "@/components/settings/ProjectMembersModal";
 
 interface CollectSource {
   id: string;
@@ -25,6 +26,9 @@ export default function CollectPage() {
   const [form, setForm] = useState({ name: "", description: "", siteUrl: "" });
   const [isCreating, setIsCreating] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [showMembers, setShowMembers] = useState(false);
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [restoring, setRestoring] = useState(false);
 
   const fetchSources = useCallback(async () => {
     if (!workspace || !currentProject) return;
@@ -103,20 +107,69 @@ export default function CollectPage() {
 
   return (
     <div className="p-8 space-y-6">
-      <div className="flex items-end justify-between">
+      <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold">데이터 수집</h1>
           <p className="text-sm text-muted-foreground mt-1.5">{currentProject.name} · 외부 사이트 폼 데이터 수집</p>
         </div>
-        <motion.button
-          whileTap={{ scale: 0.95 }}
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          수집 소스 추가
-        </motion.button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setShowMembers(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border text-xs hover:bg-secondary transition-colors"
+            aria-label="프로젝트 권한"
+          >
+            <UserPlus className="w-3.5 h-3.5" />프로젝트 권한
+          </button>
+          <label className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border text-xs hover:bg-secondary transition-colors cursor-pointer">
+            <Upload className="w-3.5 h-3.5" />백업 복구
+            <input
+              type="file"
+              accept="application/json"
+              className="hidden"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                if (!f || !workspace || !currentProject) return;
+                setRestoring(true);
+                try {
+                  const text = await f.text();
+                  const backup = JSON.parse(text);
+                  const res = await fetch("/api/collect-sources/import-backup", {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ workspaceId: workspace.id, projectId: currentProject.id, backup }),
+                  });
+                  const data = await res.json();
+                  if (!res.ok) { toast.error(data.error ?? "복구 실패"); return; }
+                  toast.success(`복구됨: ${data.imported.toLocaleString()}건 (소스 비활성 상태로 생성됨 — 확인 후 활성화)`);
+                  fetchSources();
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : "파일 처리 실패");
+                } finally {
+                  setRestoring(false);
+                  if (e.target) e.target.value = "";
+                }
+              }}
+            />
+          </label>
+          {restoring && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            수집 소스 추가
+          </motion.button>
+        </div>
       </div>
+
+      {showMembers && workspace && currentProject && (
+        <ProjectMembersModal
+          projectId={currentProject.id}
+          projectName={currentProject.name}
+          workspaceId={workspace.id}
+          onClose={() => setShowMembers(false)}
+        />
+      )}
 
       {/* 생성 폼 */}
       <AnimatePresence>

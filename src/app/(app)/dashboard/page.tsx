@@ -489,24 +489,30 @@ export default function DashboardPage() {
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={widgets.map((w) => w.id)} strategy={rectSortingStrategy}>
             <div className="grid grid-cols-12 gap-4">
-              {widgets.map((w) => (
-                <SortableWidget key={w.id} widget={w} editing={editing}>
-                  <WidgetShell
-                    widget={w}
-                    loading={widgetLoading[w.id]}
-                    editing={editing}
-                    updatedAt={widgetUpdatedAt[w.id]}
-                    onEdit={() => setEditingWidget(w)}
-                    onDelete={() => handleDelete(w)}
-                    onResize={(width) => handleResize(w, width)}
-                    onDuplicate={() => handleDuplicate(w)}
-                    onRefresh={() => fetchWidgetData(w)}
-                    onExport={() => handleExportWidget(w)}
-                  >
-                    {renderWidgetBody(w)}
-                  </WidgetShell>
-                </SortableWidget>
-              ))}
+              {widgets.map((w) => {
+                const isLoading = widgetLoading[w.id];
+                const hasData = widgetData[w.id] !== undefined;
+                return (
+                  <SortableWidget key={w.id} widget={w} editing={editing}>
+                    <WidgetShell
+                      widget={w}
+                      // 데이터 있으면 새로고침 중에도 차트 유지 (깜빡임 방지)
+                      loading={isLoading && !hasData}
+                      refreshing={isLoading && hasData}
+                      editing={editing}
+                      updatedAt={widgetUpdatedAt[w.id]}
+                      onEdit={() => setEditingWidget(w)}
+                      onDelete={() => handleDelete(w)}
+                      onResize={(width) => handleResize(w, width)}
+                      onDuplicate={() => handleDuplicate(w)}
+                      onRefresh={() => fetchWidgetData(w)}
+                      onExport={() => handleExportWidget(w)}
+                    >
+                      {renderWidgetBody(w)}
+                    </WidgetShell>
+                  </SortableWidget>
+                );
+              })}
             </div>
           </SortableContext>
         </DndContext>

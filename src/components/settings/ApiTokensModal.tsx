@@ -1,0 +1,205 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { X, Loader2, Plus, Copy, Check, Trash2, KeyRound, AlertTriangle } from "lucide-react";
+import { toast } from "sonner";
+import { formatKstDateTime } from "@/lib/datetime";
+
+interface Token {
+  id: string;
+  name: string;
+  prefix: string;
+  scopes: string[];
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+interface Props {
+  workspaceId: string;
+  onClose: () => void;
+}
+
+const SCOPES = [
+  { id: "records:read",    label: "수집 레코드 조회" },
+  { id: "records:write",   label: "수집 레코드 추가/삭제" },
+  { id: "sources:read",    label: "수집 소스 조회" },
+  { id: "sources:write",   label: "수집 소스 관리" },
+  { id: "dashboards:read", label: "대시보드 조회" },
+];
+
+export default function ApiTokensModal({ workspaceId, onClose }: Props) {
+  const [tokens, setTokens] = useState<Token[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState({ name: "", scopes: ["records:read"] as string[], expiresInDays: 0 });
+  const [newToken, setNewToken] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const fetchTokens = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/api-tokens?workspaceId=${workspaceId}`);
+      const data = await res.json();
+      setTokens(data.tokens ?? []);
+    } finally {
+      setLoading(false);
+    }
+  }, [workspaceId]);
+
+  useEffect(() => { fetchTokens(); }, [fetchTokens]);
+
+  const handleCreate = async () => {
+    if (!form.name.trim()) { toast.error("이름이 필요해요"); return; }
+    setCreating(true);
+    try {
+      const res = await fetch("/api/api-tokens", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspaceId, name: form.name.trim(), scopes: form.scopes,
+          expiresInDays: form.expiresInDays || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "생성 실패"); return; }
+      setNewToken(data.accessToken);
+      setForm({ name: "", scopes: ["records:read"], expiresInDays: 0 });
+      fetchTokens();
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleDelete = async (t: Token) => {
+    if (!confirm(`"${t.name}" 토큰을 폐기할까요? 이 토큰을 사용 중인 외부 도구는 즉시 동작을 멈춥니다.`)) return;
+    await fetch(`/api/api-tokens/${t.id}`, { method: "DELETE" });
+    fetchTokens();
+  };
+
+  const copyNewToken = () => {
+    if (!newToken) return;
+    navigator.clipboard.writeText(newToken);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="API 토큰">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="flex items-center gap-2">
+            <KeyRound className="w-4 h-4 text-violet-500" />
+            <h2 className="text-sm font-semibold">API 토큰</h2>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground" aria-label="닫기">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          <p className="text-xs text-muted-foreground">
+            외부 도구(Zapier, n8n, Postman 등)에서 xflow API 를 호출할 때 사용합니다. 토큰은 발급 직후 한 번만 표시되니 안전한 곳에 저장하세요.
+          </p>
+
+          {newToken && (
+            <div className="p-4 rounded-xl border-2 border-violet-500/30 bg-violet-500/5 space-y-2">
+              <p className="text-xs font-semibold text-violet-600 dark:text-violet-400">새 토큰이 발급됐어요 — 지금 복사하세요</p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-xs font-mono break-all">{newToken}</code>
+                <button onClick={copyNewToken} className="p-2 rounded-lg border border-border hover:bg-secondary" aria-label="복사">
+                  {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                <AlertTriangle className="inline w-3 h-3 mr-1 text-amber-500" />
+                이 토큰은 다시 표시되지 않아요. 잃어버리면 새로 발급해야 합니다.
+              </p>
+              <button onClick={() => setNewToken(null)} className="text-xs text-muted-foreground hover:text-foreground mt-2">
+                확인했어요 — 닫기
+              </button>
+            </div>
+          )}
+
+          {/* 새 토큰 폼 */}
+          <div className="p-4 rounded-xl border border-border space-y-3">
+            <input
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              placeholder="토큰 이름 (예: Zapier 연동)"
+              className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+            />
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 block">권한 (scopes)</label>
+              <div className="space-y-1">
+                {SCOPES.map((s) => (
+                  <label key={s.id} className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.scopes.includes(s.id)}
+                      onChange={(e) => setForm((f) => ({
+                        ...f,
+                        scopes: e.target.checked ? [...f.scopes, s.id] : f.scopes.filter((x) => x !== s.id),
+                      }))}
+                      className="accent-violet-500"
+                    />
+                    <code className="text-[10px] font-mono text-muted-foreground">{s.id}</code>
+                    <span>{s.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">만료</label>
+              <select
+                value={form.expiresInDays}
+                onChange={(e) => setForm((f) => ({ ...f, expiresInDays: parseInt(e.target.value) }))}
+                className="px-3 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+              >
+                <option value={0}>만료 없음</option>
+                <option value={30}>30일</option>
+                <option value={90}>90일</option>
+                <option value={365}>1년</option>
+              </select>
+            </div>
+            <button onClick={handleCreate} disabled={creating || !form.name.trim()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-500 text-white text-xs font-medium hover:bg-violet-600 disabled:opacity-40">
+              {creating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+              토큰 발급
+            </button>
+          </div>
+
+          {/* 기존 토큰 목록 */}
+          <div>
+            <p className="text-xs text-muted-foreground mb-2">발급된 토큰</p>
+            {loading ? (
+              <div className="flex items-center justify-center h-16"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>
+            ) : tokens.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-6">아직 토큰이 없어요</p>
+            ) : (
+              <div className="space-y-1.5">
+                {tokens.map((t) => (
+                  <div key={t.id} className="flex items-center gap-3 p-3 rounded-xl border border-border bg-background">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{t.name}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        <code className="font-mono">{t.prefix}...</code>
+                        {" · "}
+                        scopes: {t.scopes.join(", ") || "(없음)"}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground/70">
+                        {t.lastUsedAt ? `마지막 사용: ${formatKstDateTime(t.lastUsedAt)}` : "사용 이력 없음"}
+                        {t.expiresAt && ` · 만료: ${formatKstDateTime(t.expiresAt).slice(0, 10)}`}
+                      </p>
+                    </div>
+                    <button onClick={() => handleDelete(t)} className="p-1.5 rounded hover:bg-red-500/10 hover:text-red-500 text-muted-foreground" aria-label="삭제">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

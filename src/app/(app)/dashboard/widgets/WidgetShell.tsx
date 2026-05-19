@@ -12,7 +12,8 @@ const WIDTH_CLASS: Record<WidgetWidth, string> = {
 
 interface Props {
   widget: Widget;
-  loading?: boolean;
+  loading?: boolean;     // 초기 로드 (스피너로 children 대체)
+  refreshing?: boolean;  // 백그라운드 새로고침 (children 유지하고 헤더에 작은 표시만)
   editing?: boolean;
   updatedAt?: string;
   onEdit?: () => void;
@@ -33,7 +34,7 @@ function relativeTime(iso?: string): string {
   return `${Math.floor(diff / 3600000)}시간 전`;
 }
 
-export default function WidgetShell({ widget, loading, editing, updatedAt, onEdit, onDelete, onResize, onDuplicate, onRefresh, onExport, children }: Props) {
+export default function WidgetShell({ widget, loading, refreshing, editing, updatedAt, onEdit, onDelete, onResize, onDuplicate, onRefresh, onExport, children }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   return (
     <div className={`${WIDTH_CLASS[widget.width]} rounded-2xl border border-border bg-card p-5 relative group transition-shadow ${editing ? "ring-2 ring-violet-500/30" : ""}`}>
@@ -43,6 +44,9 @@ export default function WidgetShell({ widget, loading, editing, updatedAt, onEdi
           <h3 className="text-sm font-medium truncate">{widget.title}</h3>
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          {refreshing && (
+            <Loader2 className="w-3 h-3 animate-spin text-muted-foreground/40" />
+          )}
           {!editing && updatedAt && (
             <span className="text-[10px] text-muted-foreground/60" title={`마지막 갱신: ${new Date(updatedAt).toLocaleString("ko-KR")}`}>
               {relativeTime(updatedAt)}

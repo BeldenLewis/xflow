@@ -9,7 +9,7 @@ import {
   ToggleLeft, ToggleRight, ExternalLink, Sparkles, ClipboardPaste,
   Download, Upload, ArrowUp, ArrowDown, ChevronsUpDown, Wand2,
   ChevronLeft, ChevronRight, Search, Filter, Activity, Shield,
-  RefreshCcw, Bell, Webhook, KeyRound, Eraser, AlertTriangle,
+  RefreshCcw, Bell, Webhook, KeyRound, Eraser, AlertTriangle, ShieldAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -21,6 +21,8 @@ import RecordDetailModal from "./RecordDetailModal";
 import NormalizeModal from "./NormalizeModal";
 import TestModal from "./TestModal";
 import DangerDeleteModal from "./DangerDeleteModal";
+import GdprModal from "./GdprModal";
+import RetentionPolicyEditor from "./RetentionPolicyEditor";
 import { formatKst, formatKstDateTime } from "@/lib/datetime";
 
 type SortKind = "createdAt" | "field" | "utmSource" | "utmMedium";
@@ -140,6 +142,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
   const [showNormalize, setShowNormalize] = useState(false);
   const [showTest, setShowTest] = useState(false);
   const [showDangerDelete, setShowDangerDelete] = useState(false);
+  const [showGdpr, setShowGdpr] = useState(false);
   const [detailRecordId, setDetailRecordId] = useState<string | null>(null);
   const [sort, setSort] = useState<SortState | null>({ kind: "createdAt", dir: "desc" });
   const [page, setPage] = useState(1);
@@ -1222,6 +1225,52 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                 </button>
               </div>
 
+              {/* 백업 */}
+              <div className="p-4 rounded-2xl border border-border bg-background space-y-3 mt-6">
+                <div className="flex items-center gap-2">
+                  <Download className="w-4 h-4 text-violet-500" />
+                  <h3 className="text-sm font-medium">데이터 백업</h3>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  소스 설정 + 필드 매핑 + 모든 수집 레코드를 단일 JSON 파일로 다운로드합니다.
+                </p>
+                <a
+                  href={`/api/collect-sources/${id}/export-all`}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium hover:bg-secondary transition-colors w-fit"
+                >
+                  <Download className="w-3.5 h-3.5" />전체 JSON 백업 다운로드
+                </a>
+              </div>
+
+              {/* 보관 정책 */}
+              <div className="p-4 rounded-2xl border border-border bg-background space-y-3">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-emerald-500" />
+                  <h3 className="text-sm font-medium">자동 보관 기간</h3>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  설정 일수가 지난 레코드는 매일 자동 삭제됩니다. 개인정보 보호 대응.
+                </p>
+                <RetentionPolicyEditor sourceId={id} />
+              </div>
+
+              {/* GDPR */}
+              <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 text-amber-500" />
+                  <h3 className="text-sm font-medium">개인정보 검색·삭제 (GDPR)</h3>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  특정 이메일/전화 등이 포함된 레코드를 찾아 일괄 삭제. right-to-erasure 대응.
+                </p>
+                <button
+                  onClick={() => setShowGdpr(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-medium hover:bg-amber-500/20 transition-colors w-fit"
+                >
+                  <ShieldAlert className="w-3.5 h-3.5" />검색·삭제 열기
+                </button>
+              </div>
+
               {/* 위험 영역 */}
               <div className="p-4 rounded-2xl border-2 border-red-500/30 bg-red-500/5 space-y-3 mt-8">
                 <div className="flex items-center gap-2">
@@ -1320,6 +1369,14 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
           recordCount={recordsTotal}
           onClose={() => setShowDangerDelete(false)}
           onDeleted={() => { fetchRecords(); fetchSource(); }}
+        />
+      )}
+
+      {showGdpr && (
+        <GdprModal
+          sourceId={id}
+          onClose={() => setShowGdpr(false)}
+          onChanged={() => { fetchRecords(); }}
         />
       )}
 

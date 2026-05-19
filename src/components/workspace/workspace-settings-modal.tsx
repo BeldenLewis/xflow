@@ -212,13 +212,33 @@ export function WorkspaceSettingsModal({ open, onClose }: Props) {
     if (!inviteEmail.trim() || !workspace?.id) return;
     setIsInviting(true);
     try {
+      // 1차: 기존 회원 초대 시도
       const res = await fetch(`/api/workspace/${workspace.id}/members`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "초대하지 못했어요. 다시 시도해주세요"); return; }
+
+      // 가입하지 않은 사용자면 이메일 초대로 fallback
+      if (!res.ok && (data.error?.includes("가입") || res.status === 404)) {
+        const inviteRes = await fetch(`/api/workspace/${workspace.id}/invite-email`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
+        });
+        const inviteData = await inviteRes.json();
+        if (!inviteRes.ok) { toast.error(inviteData.error ?? "초대 실패"); return; }
+        if (inviteData.signupLink) {
+          await navigator.clipboard.writeText(inviteData.signupLink).catch(() => {});
+          toast.success("미가입자 — 가입 링크를 클립보드에 복사했어요. 직접 전달해주세요.");
+        } else {
+          toast.success("초대 발송됨");
+        }
+        setInviteEmail("");
+        return;
+      }
+
+      if (!res.ok) { toast.error(data.error ?? "초대 실패"); return; }
       setInviteEmail("");
       toast.success("초대를 보냈어요. 상대방이 수락하면 멤버로 추가돼요");
     } finally { setIsInviting(false); }

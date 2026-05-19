@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { dashboardCache } from "@/lib/cache";
+import { rateLimit } from "@/lib/ratelimit";
 import { createHash } from "node:crypto";
 
 // 공유된 보드에서 위젯 데이터 가져오기 (토큰으로 인증)
@@ -11,7 +12,15 @@ export async function POST(request: Request) {
   const body = await request.json();
   const { token, type, config, from, to, filters } = body;
 
-  if (!token) return NextResponse.json({ error: "토큰 필요" }, { status: 401 });
+  if (!token || typeof token !== "string" || token.length < 32 || !/^[A-Za-z0-9_-]+$/.test(token)) {
+    return NextResponse.json({ error: "토큰 형식 오류" }, { status: 401 });
+  }
+
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? request.headers.get("x-real-ip") ?? "unknown";
+  const rl = rateLimit(`share-data:${ip}`, { limit: 60, windowMs: 60_000 });
+  if (!rl.allowed) {
+    return NextResponse.json({ error: "요청이 너무 잦아요" }, { status: 429 });
+  }
 
   const dashboard = await prisma.dashboard.findUnique({
     where: { shareToken: token },

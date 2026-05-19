@@ -14,6 +14,9 @@ import { toast } from "sonner";
 import { WorkspaceSettingsModal } from "@/components/workspace/workspace-settings-modal";
 import { ProfileSettingsModal } from "@/components/user/profile-settings-modal";
 import { NotificationPanel } from "@/components/notifications/notification-panel";
+import WhatsNewPanel from "@/components/WhatsNewPanel";
+import ApiTokensModal from "@/components/settings/ApiTokensModal";
+import NotificationPrefsModal from "@/components/settings/NotificationPrefsModal";
 
 const navItems = [
   { href: "/dashboard", icon: LayoutDashboard, label: "대시보드" },
@@ -57,6 +60,8 @@ export function Sidebar() {
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [wsSettingsOpen, setWsSettingsOpen] = useState(false);
   const [profileSettingsOpen, setProfileSettingsOpen] = useState(false);
+  const [apiTokensOpen, setApiTokensOpen] = useState(false);
+  const [notifPrefsOpen, setNotifPrefsOpen] = useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
@@ -305,9 +310,10 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* 알림 */}
-      <div className="px-3 pb-2">
+      {/* 알림 + What's new */}
+      <div className="px-3 pb-2 flex items-center gap-1">
         <NotificationPanel />
+        <WhatsNewPanel />
       </div>
 
       {/* 하단 프로필 */}
@@ -352,12 +358,24 @@ export function Sidebar() {
                       </div>
                     </div>
                   </div>
-                  <div className="p-1">
+                  <div className="p-1 space-y-0.5">
                     <button
                       onClick={() => { setProfileOpen(false); setProfileSettingsOpen(true); }}
                       className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-secondary transition-colors text-sm text-muted-foreground hover:text-foreground">
                       <Settings className="w-3.5 h-3.5" />프로필 설정
                     </button>
+                    <button
+                      onClick={() => { setProfileOpen(false); setNotifPrefsOpen(true); }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-secondary transition-colors text-sm text-muted-foreground hover:text-foreground">
+                      🔔 알림 설정
+                    </button>
+                    {workspace && (workspace.role === "OWNER" || workspace.role === "ADMIN") && (
+                      <button
+                        onClick={() => { setProfileOpen(false); setApiTokensOpen(true); }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-secondary transition-colors text-sm text-muted-foreground hover:text-foreground">
+                        🔑 API 토큰
+                      </button>
+                    )}
                   </div>
                   <div className="border-t border-border p-1">
                     <button onClick={handleSignOut}
@@ -375,6 +393,12 @@ export function Sidebar() {
 
     <WorkspaceSettingsModal open={wsSettingsOpen} onClose={() => setWsSettingsOpen(false)} />
     <ProfileSettingsModal open={profileSettingsOpen} onClose={() => setProfileSettingsOpen(false)} />
+    {apiTokensOpen && workspace && (
+      <ApiTokensModal workspaceId={workspace.id} onClose={() => setApiTokensOpen(false)} />
+    )}
+    {notifPrefsOpen && (
+      <NotificationPrefsModal onClose={() => setNotifPrefsOpen(false)} />
+    )}
 </>
   );
 }

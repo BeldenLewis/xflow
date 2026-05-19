@@ -131,7 +131,7 @@ export const SignInPage: React.FC<SignInPageProps> = ({
       {/* Right column: smokey WebGL background + testimonials */}
       <section className="hidden md:block flex-1 relative p-4">
         <div className="animate-slide-right animate-delay-300 absolute inset-4 rounded-3xl overflow-hidden">
-          <SmokeyBackground color="#0F2044" backdropBlurAmount="none" className="rounded-3xl" />
+          <SmokeyBackground color="#1E40AF" backdropBlurAmount="none" className="rounded-3xl" />
         </div>
         {testimonials.length > 0 && (
           <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex gap-4 px-8 w-full justify-center">

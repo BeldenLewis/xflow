@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Bell, Check, X, UserPlus, ShieldCheck, UserMinus } from "lucide-react";
+import { Bell, Check, X, UserPlus, ShieldCheck, UserMinus, Database, Sparkles } from "lucide-react";
+import Link from "next/link";
 import { toast } from "sonner";
 
 interface NotificationData {
@@ -11,6 +12,16 @@ interface NotificationData {
   workspaceName?: string;
   inviterName?: string;
   role?: string;
+  // COLLECT_SUBMITTED
+  sourceId?: string;
+  sourceName?: string;
+  recordId?: string;
+  // REPORT_SENT
+  reportName?: string;
+  dashboardId?: string;
+  // generic fallback
+  message?: string;
+  [k: string]: unknown;
 }
 
 interface Notification {
@@ -123,7 +134,64 @@ function NotificationItem({ n, onAction }: { n: Notification; onAction: () => vo
     );
   }
 
-  return null;
+  if (n.type === "COLLECT_SUBMITTED") {
+    const inner = (
+      <div className={`p-4 rounded-2xl border transition-colors ${n.read ? "border-border bg-background" : "border-emerald-400/20 bg-emerald-500/5"}`}>
+        <div className="flex items-start gap-3">
+          <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500 shrink-0 mt-0.5">
+            <Database className="w-4 h-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium leading-snug">
+              <span className="font-semibold">{n.data.sourceName ?? "수집 소스"}</span> 에 새 제출이 들어왔어요
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">{timeAgo(n.createdAt)}</p>
+          </div>
+          {!n.read && <div className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 mt-1.5" />}
+        </div>
+      </div>
+    );
+    return n.data.sourceId
+      ? <Link href={`/collect/${n.data.sourceId}`} className="block">{inner}</Link>
+      : inner;
+  }
+
+  if (n.type === "REPORT_SENT") {
+    return (
+      <div className={`p-4 rounded-2xl border transition-colors ${n.read ? "border-border bg-background" : "border-violet-400/20 bg-violet-500/5"}`}>
+        <div className="flex items-start gap-3">
+          <div className="w-8 h-8 rounded-full bg-violet-500/10 flex items-center justify-center text-violet-500 shrink-0 mt-0.5">
+            <Sparkles className="w-4 h-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium leading-snug">
+              정기 리포트 <span className="font-semibold">{n.data.reportName ?? ""}</span> 가 발송됐어요
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">{timeAgo(n.createdAt)}</p>
+          </div>
+          {!n.read && <div className="w-2 h-2 rounded-full bg-violet-500 shrink-0 mt-1.5" />}
+        </div>
+      </div>
+    );
+  }
+
+  // Generic fallback — 알 수 없는 타입도 표시 (안 보이는 것보단 낫게)
+  return (
+    <div className={`p-4 rounded-2xl border transition-colors ${n.read ? "border-border bg-background" : "border-violet-400/20 bg-violet-500/5"}`}>
+      <div className="flex items-start gap-3">
+        <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-muted-foreground shrink-0 mt-0.5">
+          <Bell className="w-4 h-4" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium leading-snug">
+            {n.data.message ?? n.type}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">{timeAgo(n.createdAt)}</p>
+        </div>
+        {!n.read && <div className="w-2 h-2 rounded-full bg-violet-500 shrink-0 mt-1.5" />}
+      </div>
+    </div>
+  );
 }
 
 interface Props { sidebarWidth?: number; }

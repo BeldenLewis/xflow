@@ -41,7 +41,7 @@ export const SignUpPage: React.FC<SignUpPageProps> = ({
       {/* Left: hero image */}
       <section className="hidden md:block flex-1 relative p-4">
         <div
-          className="absolute inset-4 rounded-3xl bg-cover bg-center"
+          className="animate-slide-right animate-delay-300 absolute inset-4 rounded-3xl bg-cover bg-center"
           style={{ backgroundImage: "url(https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=2160&q=80)" }}
         />
         <div className="absolute inset-4 rounded-3xl bg-gradient-to-t from-black/60 via-transparent to-transparent" />
@@ -57,7 +57,7 @@ export const SignUpPage: React.FC<SignUpPageProps> = ({
       <section className="flex-1 flex items-center justify-center p-8">
         <div className="w-full max-w-md">
           <div className="flex flex-col gap-6">
-            <div>
+            <div className="animate-element animate-delay-100">
               <h1 className="text-4xl md:text-5xl font-semibold leading-tight">
                 <span className="font-light text-foreground tracking-tighter">시작하기</span>
               </h1>
@@ -65,13 +65,13 @@ export const SignUpPage: React.FC<SignUpPageProps> = ({
             </div>
 
             {error && (
-              <div className="rounded-2xl bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-500">
+              <div className="animate-element animate-delay-200 rounded-2xl bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-500">
                 {error}
               </div>
             )}
 
             <form className="space-y-4" onSubmit={onSignUp}>
-              <div>
+              <div className="animate-element animate-delay-200">
                 <label className="text-sm font-medium text-muted-foreground">이름</label>
                 <GlassInputWrapper>
                   <input
@@ -84,7 +84,7 @@ export const SignUpPage: React.FC<SignUpPageProps> = ({
                 </GlassInputWrapper>
               </div>
 
-              <div>
+              <div className="animate-element animate-delay-300">
                 <label className="text-sm font-medium text-muted-foreground">이메일</label>
                 <GlassInputWrapper>
                   <input
@@ -97,7 +97,7 @@ export const SignUpPage: React.FC<SignUpPageProps> = ({
                 </GlassInputWrapper>
               </div>
 
-              <div>
+              <div className="animate-element animate-delay-400">
                 <label className="text-sm font-medium text-muted-foreground">비밀번호</label>
                 <GlassInputWrapper>
                   <div className="relative">
@@ -122,7 +122,7 @@ export const SignUpPage: React.FC<SignUpPageProps> = ({
                 </GlassInputWrapper>
               </div>
 
-              <div>
+              <div className="animate-element animate-delay-500">
                 <label className="text-sm font-medium text-muted-foreground">비밀번호 확인</label>
                 <GlassInputWrapper>
                   <div className="relative">
@@ -149,26 +149,26 @@ export const SignUpPage: React.FC<SignUpPageProps> = ({
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full rounded-2xl bg-primary py-4 font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                className="animate-element animate-delay-600 w-full rounded-2xl bg-primary py-4 font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
                 {isLoading ? "계정 생성 중..." : "계정 만들기"}
               </button>
             </form>
 
-            <div className="relative flex items-center justify-center">
+            <div className="animate-element animate-delay-700 relative flex items-center justify-center">
               <span className="w-full border-t border-border" />
-              <span className="px-4 text-sm text-muted-foreground bg-background absolute">Or continue with</span>
+              <span className="px-4 text-sm text-muted-foreground bg-background absolute">또는</span>
             </div>
 
             <button
               onClick={onGoogleSignUp}
-              className="w-full flex items-center justify-center gap-3 border border-border rounded-2xl py-4 hover:bg-secondary transition-colors"
+              className="animate-element animate-delay-800 w-full flex items-center justify-center gap-3 border border-border rounded-2xl py-4 hover:bg-secondary transition-colors"
             >
               <GoogleIcon />
               Google로 시작하기
             </button>
 
-            <p className="text-center text-sm text-muted-foreground">
+            <p className="animate-element animate-delay-900 text-center text-sm text-muted-foreground">
               이미 계정이 있으신가요?{" "}
               <a
                 href="#"

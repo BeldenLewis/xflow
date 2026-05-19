@@ -60,7 +60,6 @@ export default function LoginPage() {
       <SignInPage
         title={<span className="font-semibold tracking-tighter">환영합니다</span>}
         description="계정에 로그인하고 팀과 함께 시작하세요"
-        heroImageSrc="https://images.unsplash.com/photo-1642615835477-d303d7dc9ee9?w=2160&q=80"
         testimonials={testimonials}
         onSignIn={handleSignIn}
         onGoogleSignIn={handleGoogleSignIn}

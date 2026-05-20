@@ -18,6 +18,7 @@ model User {
 
   memberships         WorkspaceMember[]
   utmLinks            UTMLink[]
+  shortLinks          ShortLink[]
   notifications       Notification[]
   sentInvitations     WorkspaceInvitation[] @relation("InvitedBy")
   receivedInvitations WorkspaceInvitation[] @relation("InvitedUser")
@@ -38,6 +39,7 @@ model Workspace {
   members        WorkspaceMember[]
   projects       Project[]
   utmLinks       UTMLink[]
+  shortLinks     ShortLink[]
   utmPresets     UTMPreset[]
   utmTemplates   UTMTemplate[]
   invitations    WorkspaceInvitation[]
@@ -376,4 +378,20 @@ model UTMLink {
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project   Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   createdBy User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+}
+
+model ShortLink {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  longUrl     String
+  workspaceId String
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([createdById, createdAt(sort: Desc)])
 }

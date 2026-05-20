@@ -40,7 +40,9 @@ export async function proxy(request: NextRequest) {
   // /api/public 과 /share 는 토큰 기반 공개 — 미들웨어 통과
   if (
     request.nextUrl.pathname.startsWith("/api/public") ||
-    request.nextUrl.pathname.startsWith("/share")
+    request.nextUrl.pathname.startsWith("/api/shorten-url") ||
+    request.nextUrl.pathname.startsWith("/share") ||
+    request.nextUrl.pathname.startsWith("/r/")
   ) {
     return NextResponse.next();
   }

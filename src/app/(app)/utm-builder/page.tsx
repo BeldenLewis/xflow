@@ -114,6 +114,19 @@ function CopyButton({ text, size = "sm" }: { text: string; size?: "sm" | "md" })
 
 const inputCls = "w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-400/20 transition-all";
 
+async function shortenUrl(longUrl: string) {
+  const res = await fetch("/api/shorten-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: longUrl }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || typeof data?.shortUrl !== "string") {
+    throw new Error(typeof data?.error === "string" ? data.error : "URL을 단축하지 못했어요");
+  }
+  return data.shortUrl;
+}
+
 function Field({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
@@ -262,15 +275,16 @@ function UTMRow({ link, onDelete, onShortUrlSaved, onEdit, onDuplicate }: {
     setIsShortening(true);
     const toastId = toast.loading("단축 중...");
     try {
-      const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(link.fullUrl)}`);
-      const short = await res.text();
+      const short = await shortenUrl(link.fullUrl);
       await fetch(`/api/utm/${link.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ shortUrl: short }),
       });
       onShortUrlSaved(link.id, short);
       toast.success("단축 URL이 저장됐어요", { id: toastId });
-    } catch { toast.error("URL을 단축하지 못했어요. 잠시 후 다시 시도해주세요", { id: toastId }); }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "URL을 단축하지 못했어요. 잠시 후 다시 시도해주세요", { id: toastId });
+    }
     finally { setIsShortening(false); }
   };
 
@@ -563,10 +577,11 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
     setIsShortening(true);
     const id = toast.loading("URL 단축 중...");
     try {
-      const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(generatedUrl)}`);
-      setShortUrl(await res.text());
+      setShortUrl(await shortenUrl(generatedUrl));
       toast.success("단축 URL 생성됨", { id });
-    } catch { toast.error("URL을 단축하지 못했어요. 잠시 후 다시 시도해주세요", { id }); }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "URL을 단축하지 못했어요. 잠시 후 다시 시도해주세요", { id });
+    }
     finally { setIsShortening(false); }
   };
 

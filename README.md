@@ -2,6 +2,15 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+Create `.env.local` and add the public base URL used by the UTM builder's built-in short links:
+
+```bash
+# Optional, defaults to the current app origin.
+SHORT_URL_BASE=https://go.example.com
+```
+
+Point the short domain at the same deployment. Short links are served from `/r/{code}`.
+
 First, run the development server:
 
 ```bash

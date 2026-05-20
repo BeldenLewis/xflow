@@ -1,0 +1,55 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { prisma } from "@/lib/prisma";
+
+async function authorize(webinarId: string, userId: string) {
+  const webinar = await prisma.webinar.findUnique({ where: { id: webinarId } });
+  if (!webinar) return null;
+  const membership = await prisma.workspaceMember.findUnique({
+    where: { userId_workspaceId: { userId, workspaceId: webinar.workspaceId } },
+  });
+  return membership ? webinar : null;
+}
+
+export async function PATCH(request: Request, { params }: { params: Promise<{ id: string; annId: string }> }) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
+
+  const { id, annId } = await params;
+  const webinar = await authorize(id, user.id);
+  if (!webinar) return NextResponse.json({ error: "접근 권한 없음" }, { status: 403 });
+
+  const body = await request.json();
+  const announcement = await prisma.webinarAnnouncement.findFirst({
+    where: { id: annId, webinarId: id },
+    select: { id: true },
+  });
+  if (!announcement) return NextResponse.json({ error: "공지를 찾지 못했어요" }, { status: 404 });
+
+  const updated = await prisma.webinarAnnouncement.update({
+    where: { id: announcement.id },
+    data: { ...(body.isActive !== undefined && { isActive: body.isActive }), ...(body.message !== undefined && { message: body.message }) },
+  });
+
+  return NextResponse.json({ announcement: updated });
+}
+
+export async function DELETE(request: Request, { params }: { params: Promise<{ id: string; annId: string }> }) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
+
+  const { id, annId } = await params;
+  const webinar = await authorize(id, user.id);
+  if (!webinar) return NextResponse.json({ error: "접근 권한 없음" }, { status: 403 });
+
+  const announcement = await prisma.webinarAnnouncement.findFirst({
+    where: { id: annId, webinarId: id },
+    select: { id: true },
+  });
+  if (!announcement) return NextResponse.json({ error: "공지를 찾지 못했어요" }, { status: 404 });
+
+  await prisma.webinarAnnouncement.delete({ where: { id: announcement.id } });
+  return NextResponse.json({ ok: true });
+}

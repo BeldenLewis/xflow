@@ -37,6 +37,16 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // /api/webinar/[slug]/* 는 공개 웨비나 API (인증 불필요)
+  if (request.nextUrl.pathname.startsWith("/api/webinar/")) {
+    return NextResponse.next();
+  }
+
+  // /webinar/[slug]/live 는 공개 라이브 페이지
+  if (request.nextUrl.pathname.match(/^\/webinar\/[^/]+\/live/)) {
+    return NextResponse.next();
+  }
+
   // /api/public 과 /share 는 토큰 기반 공개 — 미들웨어 통과
   if (
     request.nextUrl.pathname.startsWith("/api/public") ||

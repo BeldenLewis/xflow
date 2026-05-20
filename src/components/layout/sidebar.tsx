@@ -6,7 +6,7 @@ import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, Link2, BarChart3, LogOut,
-  ChevronDown, Plus, FolderOpen, Check, Loader2, Settings2, Settings, Database,
+  ChevronDown, Plus, FolderOpen, Check, Loader2, Settings2, Settings, Database, Video,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useWorkspace } from "@/contexts/workspace";
@@ -22,6 +22,7 @@ const navItems = [
   { href: "/dashboard", icon: LayoutDashboard, label: "대시보드" },
   { href: "/utm-builder", icon: Link2, label: "UTM 빌더" },
   { href: "/collect", icon: Database, label: "데이터 수집" },
+  { href: "/webinar", icon: Video, label: "웨비나" },
   { href: "/analytics", icon: BarChart3, label: "마케팅 채널", soon: true },
 ];
 

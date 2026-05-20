@@ -50,6 +50,7 @@ model Workspace {
   dashboards       Dashboard[]
   scheduledReports ScheduledReport[]
   apiTokens        ApiToken[]
+  webinars         Webinar[]
 }
 
 model WorkspaceMember {
@@ -117,6 +118,7 @@ model Project {
   dashboardWidgets DashboardWidget[]
   dashboards       Dashboard[]
   projectMembers   ProjectMember[]
+  webinars         Webinar[]
 }
 
 model UTMPreset {
@@ -394,4 +396,162 @@ model ShortLink {
 
   @@index([workspaceId, createdAt(sort: Desc)])
   @@index([createdById, createdAt(sort: Desc)])
+}
+
+model Webinar {
+  id             String   @id @default(cuid())
+  workspaceId    String
+  projectId      String
+  name           String
+  slug           String   @unique
+  description    String?
+  liveStartAt    DateTime
+  liveEndAt      DateTime
+  signupDeadline DateTime
+  theme          Json     // { accentColor, bgColor, surfaceColor, textColor, font, borderRadius, bgEffect }
+  config         Json     // { youtubeId, calendarUrl, surveyUrl, etc. }
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  workspace     Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project       Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sessions      WebinarSession[]
+  registrations WebinarRegistration[]
+  questions     WebinarQA[]
+  announcements WebinarAnnouncement[]
+  popups        WebinarPopup[]
+  tallyPushes   WebinarTallyPush[]
+
+  @@index([projectId, createdAt(sort: Desc)])
+  @@index([workspaceId])
+  @@index([slug])
+}
+
+model WebinarSession {
+  id          String  @id @default(cuid())
+  webinarId   String
+  number      Int
+  title       String
+  speaker     String?
+  description String?
+  startTime   String
+  endTime     String
+
+  webinar Webinar @relation(fields: [webinarId], references: [id], onDelete: Cascade)
+
+  @@index([webinarId, number])
+}
+
+model WebinarRegistration {
+  id             String    @id @default(cuid())
+  webinarId      String
+  name           String
+  phone          String?
+  email          String?
+  company        String?
+  department     String?
+  jobTitle       String?
+  industry       String?
+  agreeMarketing Boolean   @default(false)
+  agreePrivacy   Boolean   @default(true)
+  memo           String?
+  enteredAt      DateTime?
+  leftAt         DateTime?
+  lastPingAt     DateTime?
+  presencePingAt DateTime?
+  stayMinutes    Int       @default(0)
+  isActive       Boolean   @default(false)
+  submittedAt    DateTime  @default(now())
+
+  webinar Webinar @relation(fields: [webinarId], references: [id], onDelete: Cascade)
+
+  @@index([webinarId, submittedAt(sort: Desc)])
+  @@index([webinarId, phone])
+  @@index([webinarId, email])
+}
+
+model WebinarQA {
+  id             String   @id @default(cuid())
+  webinarId      String
+  registrationId String?
+  question       String
+  sessionNumber  Int?
+  status         String   @default("pending")
+  name           String?
+  company        String?
+  phone          String?
+  email          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  webinar Webinar @relation(fields: [webinarId], references: [id], onDelete: Cascade)
+
+  @@index([webinarId, createdAt(sort: Desc)])
+  @@index([webinarId, status])
+}
+
+model WebinarAnnouncement {
+  id        String   @id @default(cuid())
+  webinarId String
+  type      String   @default("info")
+  message   String
+  isActive  Boolean  @default(false)
+  sentBy    String?
+  createdAt DateTime @default(now())
+
+  webinar Webinar @relation(fields: [webinarId], references: [id], onDelete: Cascade)
+
+  @@index([webinarId, isActive])
+}
+
+model WebinarPopup {
+  id                  String   @id @default(cuid())
+  webinarId           String
+  type                String   @default("notice")
+  title               String
+  message             String?
+  buttonLabel         String?
+  buttonUrl           String?
+  secondaryLabel      String?
+  secondaryUrl        String?
+  integrationType     String   @default("link")
+  embedCode           String?
+  tallyFormId         String?
+  tallyEmojiText      String?
+  tallyEmojiAnimation String?
+  tallyLayout         String?
+  tallyWidth          Int?
+  tallyAutoClose      Int?
+  dismissible         Boolean  @default(true)
+  isActive            Boolean  @default(false)
+  sentBy              String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  webinar Webinar @relation(fields: [webinarId], references: [id], onDelete: Cascade)
+
+  @@index([webinarId, isActive])
+}
+
+model WebinarTallyPush {
+  id                   String   @id @default(cuid())
+  webinarId            String
+  title                String
+  formId               String
+  emojiText            String?
+  emojiAnimation       String?
+  layout               String   @default("modal")
+  width                Int      @default(700)
+  autoClose            Int      @default(5000)
+  showOnce             Boolean  @default(true)
+  doNotShowAfterSubmit Boolean  @default(true)
+  memo                 String?
+  isActive             Boolean  @default(false)
+  sentBy               String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  webinar Webinar @relation(fields: [webinarId], references: [id], onDelete: Cascade)
+
+  @@index([webinarId, isActive])
 }

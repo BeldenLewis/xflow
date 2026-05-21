@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, CalendarDays, Clock3, Sparkles, TrendingUp, Users } from "lucide-react";
+import { Activity, CalendarDays, Clock3, TrendingUp, Users } from "lucide-react";
 import type { ElementType } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatKstDateTime } from "@/lib/datetime";
@@ -63,28 +63,6 @@ function formatPercent(value: number | null) {
   if (value === null || Number.isNaN(value)) return "비교 데이터 없음";
   const sign = value > 0 ? "+" : "";
   return `${sign}${value.toFixed(1)}%`;
-}
-
-function getReportLead(data: RealtimeReportData, rangeLabel: string) {
-  const topUtm = data.utmTop[0];
-  const topComposition = data.composition[0]?.items[0];
-  const change = data.performance.rangeChange;
-  const changeText = change === null
-    ? "이전 기간 비교 데이터는 아직 부족해요"
-    : `이전 기간보다 ${formatPercent(change)} ${change >= 0 ? "증가" : "감소"}했어요`;
-
-  if (!topUtm && !topComposition) {
-    return `${rangeLabel} 기준 ${formatNumber(data.performance.rangeCount)}건이 등록됐고, 오늘은 현재 ${formatNumber(data.performance.todayCount)}건이 들어왔어요. ${changeText}.`;
-  }
-
-  const utmText = topUtm
-    ? `가장 많은 유입 조합은 ${topUtm.source} / ${topUtm.medium} / ${topUtm.campaign}입니다`
-    : "아직 뚜렷한 UTM 상위 조합은 없어요";
-  const visitorText = topComposition
-    ? `관람객 구성에서는 ${topComposition.label} 비중이 가장 높게 보입니다`
-    : "관람객 구성 데이터는 더 쌓이면 읽을 수 있어요";
-
-  return `${rangeLabel} 기준 ${formatNumber(data.performance.rangeCount)}건이 등록됐고, 오늘은 현재 ${formatNumber(data.performance.todayCount)}건이 들어왔어요. ${utmText}. ${visitorText}.`;
 }
 
 function MetricCard({ label, value, helper, icon: Icon }: {
@@ -302,11 +280,7 @@ export default function RealtimeReport({ data, loading, rangeLabel }: Props) {
       <div className="rounded-[28px] border border-border bg-secondary/10 p-5 md:p-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-violet-500/20 bg-violet-500/10 px-3 py-1 text-xs font-medium text-violet-500">
-              <Sparkles className="w-3.5 h-3.5" />실시간 전시 리포트
-            </div>
-            <h2 className="mt-3 text-xl font-semibold tracking-tight">오늘의 사전등록 흐름</h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">{getReportLead(data, rangeLabel)}</p>
+            <h2 className="text-xl font-semibold tracking-tight">오늘의 사전등록 흐름</h2>
           </div>
           <div className="text-right text-xs text-muted-foreground">
             <p>{rangeLabel}</p>

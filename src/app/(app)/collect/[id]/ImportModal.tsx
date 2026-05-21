@@ -59,6 +59,15 @@ interface ImportDiagnostics {
   parsedCreatedAtRows: number;
 }
 
+interface ImportResult {
+  imported?: number;
+  updated?: number;
+  skipped?: number;
+  error?: string;
+}
+
+const IMPORT_BATCH_SIZE = 500;
+
 function normalize(s: string) {
   return s.trim().toLowerCase().replace(/\s+/g, "").replace(/[_\-/().]/g, "");
 }
@@ -312,6 +321,29 @@ function buildImportRecords(sheet: ParsedSheet, targets: ColumnTarget[]) {
   return { records, diagnostics };
 }
 
+async function readImportResponse(res: Response): Promise<ImportResult> {
+  const text = await res.text();
+  let parsed: ImportResult | null = null;
+
+  if (text) {
+    try {
+      parsed = JSON.parse(text) as ImportResult;
+    } catch {
+      parsed = null;
+    }
+  }
+
+  if (!res.ok) {
+    const rawMessage = parsed?.error || text || `HTTP ${res.status}`;
+    const friendlyMessage = rawMessage.includes("Request Entity Too Large")
+      ? "파일이 커서 한 번에 전송할 수 없어요. 페이지를 새로고침한 뒤 다시 시도해주세요."
+      : rawMessage.slice(0, 240);
+    throw new Error(friendlyMessage);
+  }
+
+  return parsed ?? {};
+}
+
 export default function ImportModal({ sourceId, fieldMappings, onClose, onImported }: ImportModalProps) {
   const [step, setStep] = useState<"upload" | "map">("upload");
   const [parsing, setParsing] = useState(false);
@@ -319,6 +351,7 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
   const [targets, setTargets] = useState<ColumnTarget[]>([]);
   const [fileName, setFileName] = useState("");
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
   const [dedupMode, setDedupMode] = useState<"skip" | "merge" | "all">("skip");
   const [mergeKeyField, setMergeKeyField] = useState<string>(fieldMappings[0]?.key ?? "");
   const [mergeUpdateFields, setMergeUpdateFields] = useState<string[]>([]);
@@ -326,6 +359,7 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
 
   const handleFile = async (file: File) => {
     setParsing(true);
+    setImportProgress(null);
     setFileName(file.name);
     try {
       const XLSX = await import("xlsx");
@@ -388,6 +422,7 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
       }
     }
     setImporting(true);
+    setImportProgress(null);
     try {
       const { records, diagnostics } = buildImportRecords(sheet, targets);
 
@@ -398,24 +433,31 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
         return;
       }
 
-      const res = await fetch(`/api/collect-sources/${sourceId}/records/import`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          records,
-          mode: dedupMode,
-          ...(dedupMode === "merge" ? { keyField: mergeKeyField, updateFields: mergeUpdateFields } : {}),
-        }),
-      });
-      const result = await res.json();
-      if (!res.ok) {
-        toast.error(result.error ?? "가져오기 실패");
-        return;
+      const totals = { imported: 0, updated: 0, skipped: 0 };
+      setImportProgress({ done: 0, total: records.length });
+
+      for (let i = 0; i < records.length; i += IMPORT_BATCH_SIZE) {
+        const chunk = records.slice(i, i + IMPORT_BATCH_SIZE);
+        const res = await fetch(`/api/collect-sources/${sourceId}/records/import`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            records: chunk,
+            mode: dedupMode,
+            ...(dedupMode === "merge" ? { keyField: mergeKeyField, updateFields: mergeUpdateFields } : {}),
+          }),
+        });
+        const result = await readImportResponse(res);
+        totals.imported += result.imported ?? 0;
+        totals.updated += result.updated ?? 0;
+        totals.skipped += result.skipped ?? 0;
+        setImportProgress({ done: Math.min(i + chunk.length, records.length), total: records.length });
       }
+
       const parts: string[] = [];
-      if (result.imported > 0) parts.push(`신규 ${result.imported}건`);
-      if (result.updated > 0) parts.push(`업데이트 ${result.updated}건`);
-      if (result.skipped > 0) parts.push(`중복 ${result.skipped}건 건너뜀`);
+      if (totals.imported > 0) parts.push(`신규 ${totals.imported.toLocaleString()}건`);
+      if (totals.updated > 0) parts.push(`업데이트 ${totals.updated.toLocaleString()}건`);
+      if (totals.skipped > 0) parts.push(`중복 ${totals.skipped.toLocaleString()}건 건너뜀`);
       toast.success(parts.length > 0 ? parts.join(" · ") : "변경된 데이터가 없어요");
       onImported();
       onClose();
@@ -423,12 +465,16 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
       toast.error(e instanceof Error ? e.message : "가져오기 실패");
     } finally {
       setImporting(false);
+      setImportProgress(null);
     }
   };
 
   const previewRows = sheet?.rows.slice(0, 3) ?? [];
   const mergeUpdateOptions = getUpdateOptions(targets, fieldMappings);
   const importDiagnostics = sheet ? buildImportRecords(sheet, targets).diagnostics : null;
+  const importProgressPercent = importProgress && importProgress.total > 0
+    ? Math.round((importProgress.done / importProgress.total) * 100)
+    : 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
@@ -704,19 +750,40 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
 
             <div className="flex items-center justify-between gap-2 pt-1">
               <button
-                onClick={() => { setStep("upload"); setSheet(null); setFileName(""); }}
+                onClick={() => { setStep("upload"); setSheet(null); setFileName(""); setImportProgress(null); }}
+                disabled={importing}
                 className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
                 다시 선택
               </button>
-              <button
-                onClick={handleImport}
-                disabled={importing}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
-              >
-                {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                {importing ? "가져오는 중..." : `${sheet?.rows.length ?? 0}건 가져오기`}
-              </button>
+              <div className="flex items-center gap-3">
+                {importProgress && (
+                  <div className="hidden sm:block w-44">
+                    <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
+                      <span>{importProgress.done.toLocaleString()} / {importProgress.total.toLocaleString()}</span>
+                      <span>{importProgressPercent}%</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-border overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-violet-500 transition-all"
+                        style={{ width: `${importProgressPercent}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+                <button
+                  onClick={handleImport}
+                  disabled={importing}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
+                >
+                  {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  {importing && importProgress
+                    ? `${importProgress.done.toLocaleString()} / ${importProgress.total.toLocaleString()} 처리 중`
+                    : importing
+                      ? "가져오는 중..."
+                      : `${importDiagnostics?.importableRows ?? sheet?.rows.length ?? 0}건 가져오기`}
+                </button>
+              </div>
             </div>
           </div>
         )}

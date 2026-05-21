@@ -27,11 +27,15 @@ const ROLE_COLOR: Record<string, string> = {
 };
 
 const PRESET_FIELDS = [
-  { key: "source",  label: "utm_source" },
-  { key: "medium",  label: "utm_medium" },
-  { key: "content", label: "utm_content" },
+  { key: "source", label: "utm_source", labelPlaceholder: "구글", valuePlaceholder: "google" },
+  { key: "medium", label: "utm_medium", labelPlaceholder: "검색 광고", valuePlaceholder: "cpc" },
+  { key: "campaign", label: "utm_campaign", labelPlaceholder: "여름 이벤트", valuePlaceholder: "summer_event" },
 ] as const;
 type Field = (typeof PRESET_FIELDS)[number]["key"];
+
+function getPresetFieldMeta(field: string) {
+  return PRESET_FIELDS.find((item) => item.key === field) ?? PRESET_FIELDS[0];
+}
 
 interface Preset { id: string; field: string; value: string; label?: string | null; sortOrder: number; }
 interface Template { id: string; name: string; source: string; medium: string; campaign?: string | null; term?: string | null; content?: string | null; }
@@ -55,7 +59,7 @@ function SortablePresetRow({ p, activeField, editingPresetId, editingLabel, edit
           <div className="space-y-1">
             <label className="text-[11px] text-muted-foreground">표시 이름</label>
             <input type="text" value={editingLabel} onChange={(e) => setEditingLabel(e.target.value)}
-              placeholder={activeField === "source" ? "구글" : activeField === "medium" ? "검색 광고" : "표시 이름"}
+              placeholder={getPresetFieldMeta(activeField).labelPlaceholder}
               className={smInputCls} autoFocus />
           </div>
           <div className="space-y-1">
@@ -346,6 +350,8 @@ export function WorkspaceSettingsModal({ open, onClose }: Props) {
   };
 
   const fieldPresets = presets.filter((p) => p.field === activeField);
+  const activeFieldMeta = getPresetFieldMeta(activeField);
+  const templatePresetValues = (field: Field) => presets.filter((p) => p.field === field);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const handleDragEnd = async (event: DragEndEvent) => {
@@ -557,10 +563,10 @@ export function WorkspaceSettingsModal({ open, onClose }: Props) {
                       <div className="space-y-4">
                         <div>
                           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">UTM 허용값</p>
-                          <p className="text-xs text-muted-foreground mt-1">등록된 값만 UTM 빌더 드롭다운에 표시돼요. 팀 전체가 일관된 값을 사용할 수 있어요.</p>
+                          <p className="text-xs text-muted-foreground mt-1">source, medium, campaign 규칙값이 UTM 빌더 드롭다운과 추천값에 표시돼요.</p>
                         </div>
 
-                        <div className="flex gap-1.5">
+                        <div className="flex flex-wrap gap-1.5">
                           {PRESET_FIELDS.map(({ key, label }) => {
                             const count = presets.filter((p) => p.field === key).length;
                             return (
@@ -599,14 +605,14 @@ export function WorkspaceSettingsModal({ open, onClose }: Props) {
                             <div className="space-y-1">
                               <label className="text-[11px] text-muted-foreground">표시 이름</label>
                               <input type="text"
-                                placeholder={activeField === "source" ? "구글" : activeField === "medium" ? "검색 광고" : "표시 이름"}
+                                placeholder={activeFieldMeta.labelPlaceholder}
                                 value={newPresetLabel} onChange={(e) => setNewPresetLabel(e.target.value)}
                                 className={smInputCls} />
                             </div>
                             <div className="space-y-1">
                               <label className="text-[11px] text-muted-foreground">UTM 값 *</label>
                               <input type="text"
-                                placeholder={activeField === "source" ? "google" : activeField === "medium" ? "cpc" : "값"}
+                                placeholder={activeFieldMeta.valuePlaceholder}
                                 value={newPresetValue} onChange={(e) => setNewPresetValue(e.target.value)}
                                 onKeyDown={(e) => { if (e.key === "Enter") handleAddPreset(); }}
                                 className={smInputCls} />
@@ -670,25 +676,37 @@ export function WorkspaceSettingsModal({ open, onClose }: Props) {
                                 </div>
                                 <div>
                                   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">utm_source *</label>
-                                  <input type="text" placeholder="예: google" value={tForm.source}
+                                  <input type="text" list="utm-template-source-presets" placeholder="예: google" value={tForm.source}
                                     onChange={(e) => setTForm((f) => ({ ...f, source: e.target.value }))} className={inputCls} />
                                 </div>
                                 <div>
                                   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">utm_medium *</label>
-                                  <input type="text" placeholder="예: cpc" value={tForm.medium}
+                                  <input type="text" list="utm-template-medium-presets" placeholder="예: cpc" value={tForm.medium}
                                     onChange={(e) => setTForm((f) => ({ ...f, medium: e.target.value }))} className={inputCls} />
                                 </div>
                                 <div>
                                   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">utm_campaign (선택)</label>
-                                  <input type="text" placeholder="예: 2025_브랜드" value={tForm.campaign}
+                                  <input type="text" list="utm-template-campaign-presets" placeholder="예: 2025_브랜드" value={tForm.campaign}
                                     onChange={(e) => setTForm((f) => ({ ...f, campaign: e.target.value }))} className={inputCls} />
                                 </div>
                                 <div>
+                                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">utm_term (선택)</label>
+                                  <input type="text" placeholder="예: 브랜드_키워드" value={tForm.term}
+                                    onChange={(e) => setTForm((f) => ({ ...f, term: e.target.value }))} className={inputCls} />
+                                </div>
+                                <div className="col-span-2">
                                   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">utm_content (선택)</label>
                                   <input type="text" placeholder="예: 배너_상단" value={tForm.content}
                                     onChange={(e) => setTForm((f) => ({ ...f, content: e.target.value }))} className={inputCls} />
                                 </div>
                               </div>
+                              {PRESET_FIELDS.map(({ key: field }) => (
+                                <datalist key={field} id={`utm-template-${field}-presets`}>
+                                  {templatePresetValues(field).map((preset) => (
+                                    <option key={preset.id} value={preset.value}>{preset.label || preset.value}</option>
+                                  ))}
+                                </datalist>
+                              ))}
                               <div className="flex gap-2 justify-end">
                                 <button onClick={() => { setShowNewTemplate(false); setTForm({ name: "", source: "", medium: "", campaign: "", term: "", content: "" }); }}
                                   className="px-4 py-2 rounded-xl border border-border text-sm hover:bg-secondary transition-colors">취소</button>

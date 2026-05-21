@@ -33,9 +33,9 @@ const BASIC_MEDIUMS = [
   { label: "추천링크",   value: "referral", desc: "다른 사이트 링크" },
 ];
 
-const FALLBACK_SOURCES = ["google", "naver", "kakao", "instagram", "facebook", "youtube", "email"];
-const FALLBACK_MEDIUMS = ["cpc", "organic", "social", "email", "referral", "display"];
 const DRAFT_KEY = "xflow-utm-draft";
+type BuilderMode = "basic" | "advanced";
+type CampaignEntryMode = "select" | "custom";
 
 interface UTMLink {
   id: string; name: string | null; url: string;
@@ -48,8 +48,57 @@ interface UTMLink {
 interface Preset   { id: string; field: string; value: string; label?: string | null; }
 interface Template { id: string; name: string; source: string; medium: string; campaign?: string | null; term?: string | null; content?: string | null; }
 interface FormState { url: string; source: string; medium: string; campaign: string; term: string; content: string; name: string; }
+interface DraftState {
+  mode: BuilderMode;
+  form: FormState;
+  advUrls: string[];
+  advSources: string[];
+  advMediums: string[];
+  shortUrl: string;
+  campaignEntryMode: CampaignEntryMode;
+}
 
 const EMPTY_FORM: FormState = { url: "", source: "", medium: "", campaign: "", term: "", content: "", name: "" };
+
+function hasFormValue(form: FormState) {
+  return Object.values(form).some(Boolean);
+}
+
+function hasDraftValue(draft: DraftState) {
+  return hasFormValue(draft.form) ||
+    draft.advUrls.length > 0 ||
+    draft.advSources.length > 0 ||
+    draft.advMediums.length > 0 ||
+    Boolean(draft.shortUrl);
+}
+
+function readDraft(raw: string | null): DraftState | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<DraftState> & Partial<FormState>;
+    const form = "form" in parsed && parsed.form ? parsed.form : {
+      url: parsed.url || "",
+      source: parsed.source || "",
+      medium: parsed.medium || "",
+      campaign: parsed.campaign || "",
+      term: parsed.term || "",
+      content: parsed.content || "",
+      name: parsed.name || "",
+    };
+    const draft: DraftState = {
+      mode: parsed.mode === "advanced" ? "advanced" : "basic",
+      form: { ...EMPTY_FORM, ...form },
+      advUrls: Array.isArray(parsed.advUrls) ? parsed.advUrls : [],
+      advSources: Array.isArray(parsed.advSources) ? parsed.advSources : [],
+      advMediums: Array.isArray(parsed.advMediums) ? parsed.advMediums : [],
+      shortUrl: typeof parsed.shortUrl === "string" ? parsed.shortUrl : "",
+      campaignEntryMode: parsed.campaignEntryMode === "custom" ? "custom" : "select",
+    };
+    return hasDraftValue(draft) ? draft : null;
+  } catch {
+    return null;
+  }
+}
 
 function getDateGroup(dateStr: string): string {
   const date = new Date(dateStr);
@@ -68,6 +117,20 @@ function hasCampaignFormatIssue(campaign: string) {
 
 function normalizeCampaign(campaign: string) {
   return campaign.replace(/\s+/g, "_").toLowerCase();
+}
+
+function uniqueValues(values: Array<string | null | undefined>) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  values.forEach((value) => {
+    const v = value?.trim();
+    if (!v || seen.has(v)) return;
+    seen.add(v);
+    result.push(v);
+  });
+
+  return result;
 }
 
 function exportToCSV(links: UTMLink[]) {
@@ -217,6 +280,30 @@ function TagInput({ tags, onChange, suggestions, placeholder }: {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function SuggestionChips({ options, value, onSelect }: {
+  options: string[];
+  value: string;
+  onSelect: (value: string) => void;
+}) {
+  const filtered = options.filter((option) => option !== value);
+  if (filtered.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap gap-1 mt-2">
+      {filtered.map((option) => (
+        <button
+          key={option}
+          type="button"
+          onClick={() => onSelect(option)}
+          className="px-2 py-1 rounded-lg border border-border text-xs text-muted-foreground hover:border-violet-400 hover:text-violet-500 transition-colors"
+        >
+          + {option}
+        </button>
+      ))}
     </div>
   );
 }
@@ -418,7 +505,7 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
 }) {
   const { currentProject } = useWorkspace();
   const isEdit = !!editingLink;
-  const [mode, setMode] = useState<"basic" | "advanced">("basic");
+  const [mode, setMode] = useState<BuilderMode>("basic");
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [advUrls, setAdvUrls] = useState<string[]>([]);
   const [advSources, setAdvSources] = useState<string[]>([]);
@@ -428,45 +515,91 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
   const [showQR, setShowQR] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [appliedTemplate, setAppliedTemplate] = useState<string | null>(null);
+  const [campaignEntryMode, setCampaignEntryMode] = useState<CampaignEntryMode>("select");
   const [urlStatus, setUrlStatus] = useState<"idle" | "checking" | "ok" | "warn">("idle");
   const [showDraftBanner, setShowDraftBanner] = useState(false);
   const urlTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const set = (key: keyof FormState) => (value: string) => setForm((f) => ({ ...f, [key]: value }));
+  const getDraft = useCallback((): DraftState => ({
+    mode,
+    form,
+    advUrls,
+    advSources,
+    advMediums,
+    shortUrl,
+    campaignEntryMode,
+  }), [mode, form, advUrls, advSources, advMediums, shortUrl, campaignEntryMode]);
+
+  const persistDraft = useCallback(() => {
+    const draft = getDraft();
+    if (hasDraftValue(draft)) localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    else localStorage.removeItem(DRAFT_KEY);
+  }, [getDraft]);
+
+  const seedAdvancedFromBasic = useCallback(() => {
+    const addIfMissing = (values: string[], value: string) => {
+      const v = value.trim();
+      return v && !values.includes(v) ? [...values, v] : values;
+    };
+
+    setAdvUrls((values) => addIfMissing(values, form.url));
+    setAdvSources((values) => addIfMissing(values, form.source));
+    setAdvMediums((values) => addIfMissing(values, form.medium));
+  }, [form.url, form.source, form.medium]);
+
+  const handleModeChange = useCallback((nextMode: BuilderMode) => {
+    if (nextMode === mode) return;
+    if (mode === "basic" && nextMode === "advanced") seedAdvancedFromBasic();
+    setMode(nextMode);
+  }, [mode, seedAdvancedFromBasic]);
 
   // 드로어 열릴 때 초기화
   useEffect(() => {
     if (!open) return;
     setUrlStatus("idle");
     setShowDraftBanner(false);
+    setCampaignEntryMode("select");
     if (editingLink) {
+      setMode("basic");
       setForm({ url: editingLink.url, source: editingLink.utmSource, medium: editingLink.utmMedium,
         campaign: editingLink.utmCampaign, term: editingLink.utmTerm || "", content: editingLink.utmContent || "", name: editingLink.name || "" });
       setShortUrl(editingLink.shortUrl || "");
+      setAdvUrls([]); setAdvSources([]); setAdvMediums([]);
       return;
     }
     if (duplicateFrom) {
+      setMode("basic");
       setForm({ url: duplicateFrom.url, source: duplicateFrom.utmSource, medium: duplicateFrom.utmMedium,
         campaign: duplicateFrom.utmCampaign, term: duplicateFrom.utmTerm || "", content: duplicateFrom.utmContent || "", name: "" });
       setShortUrl("");
+      setAdvUrls([]); setAdvSources([]); setAdvMediums([]);
       return;
     }
     // 신규: 드래프트 복원
-    try {
-      const saved = localStorage.getItem(DRAFT_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as FormState;
-        if (Object.values(parsed).some(Boolean)) { setForm(parsed); setShowDraftBanner(true); }
-      }
-    } catch { /* ignore */ }
+    const draft = readDraft(localStorage.getItem(DRAFT_KEY));
+    if (draft) {
+      setMode(draft.mode);
+      setForm(draft.form);
+      setAdvUrls(draft.advUrls);
+      setAdvSources(draft.advSources);
+      setAdvMediums(draft.advMediums);
+      setShortUrl(draft.shortUrl);
+      setCampaignEntryMode(draft.campaignEntryMode);
+      setShowDraftBanner(true);
+      return;
+    }
+    setMode("basic");
+    setForm(EMPTY_FORM);
+    setAdvUrls([]); setAdvSources([]); setAdvMediums([]);
+    setShortUrl("");
   }, [open, editingLink, duplicateFrom]);
 
   // 드래프트 자동저장 (신규 모드만)
   useEffect(() => {
     if (isEdit || !!duplicateFrom || !open) return;
-    if (Object.values(form).some(Boolean)) localStorage.setItem(DRAFT_KEY, JSON.stringify(form));
-    else localStorage.removeItem(DRAFT_KEY);
-  }, [form, isEdit, duplicateFrom, open]);
+    persistDraft();
+  }, [persistDraft, isEdit, duplicateFrom, open]);
 
   const generatedUrl = useMemo(() => {
     if (!form.url || !form.source || !form.medium || !form.campaign) return "";
@@ -519,9 +652,25 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
     );
   }, [advUrls, form.campaign, advSources, advMediums]);
 
+  const advancedGeneratedUrl = useMemo(() => {
+    if (advCombinations.length !== 1) return "";
+    const { url, source, medium } = advCombinations[0];
+    try {
+      const base = url.startsWith("http") ? url : `https://${url}`;
+      const u = new URL(base);
+      u.searchParams.set("utm_source", source);
+      u.searchParams.set("utm_medium", medium);
+      u.searchParams.set("utm_campaign", form.campaign);
+      if (form.term)    u.searchParams.set("utm_term", form.term);
+      if (form.content) u.searchParams.set("utm_content", form.content);
+      return u.toString();
+    } catch { return ""; }
+  }, [advCombinations, form.campaign, form.term, form.content]);
+
   const reset = () => {
     setForm(EMPTY_FORM);
     setShortUrl(""); setShowQR(false); setAppliedTemplate(null);
+    setCampaignEntryMode("select");
     setUrlStatus("idle"); setShowDraftBanner(false);
     setAdvUrls([]); setAdvSources([]); setAdvMediums([]);
     localStorage.removeItem(DRAFT_KEY);
@@ -537,6 +686,9 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
         advCombinations.map(({ url, source, medium }) => {
           const base = url.startsWith("http") ? url : `https://${url}`;
           const u = new URL(base);
+          const linkName = form.name
+            ? (n === 1 ? form.name : `${form.name} · ${source}/${medium}`)
+            : null;
           u.searchParams.set("utm_source", source);
           u.searchParams.set("utm_medium", medium);
           u.searchParams.set("utm_campaign", form.campaign);
@@ -545,11 +697,12 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
           return fetch("/api/utm", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              name: n === 1 ? (form.name || null) : null,
+              name: linkName,
               url: base, utmSource: source, utmMedium: medium,
               utmCampaign: form.campaign,
               utmTerm: form.term || null, utmContent: form.content || null,
-              fullUrl: u.toString(), projectId: currentProject?.id || null,
+              fullUrl: u.toString(), shortUrl: n === 1 ? (shortUrl || null) : null,
+              projectId: currentProject?.id || null,
             }),
           });
         })
@@ -561,6 +714,7 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
   };
 
   const handleClose = () => {
+    if (!isEdit && !duplicateFrom) persistDraft();
     setShowDraftBanner(false);
     if (isEdit || !!duplicateFrom) { setForm(EMPTY_FORM); setShortUrl(""); setAppliedTemplate(null); }
     onClose();
@@ -569,15 +723,16 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
   const handleTemplateSelect = (t: Template) => {
     setForm((f) => ({ ...f, source: t.source, medium: t.medium, campaign: t.campaign || f.campaign, term: t.term || "", content: t.content || "" }));
     setAppliedTemplate(t.name);
+    setCampaignEntryMode("select");
     toast.success(`'${t.name}' 템플릿 적용됨`);
   };
 
-  const handleShorten = async () => {
-    if (!generatedUrl) return;
+  const handleShorten = async (url = generatedUrl) => {
+    if (!url) return;
     setIsShortening(true);
     const id = toast.loading("URL 단축 중...");
     try {
-      setShortUrl(await shortenUrl(generatedUrl));
+      setShortUrl(await shortenUrl(url));
       toast.success("단축 URL 생성됨", { id });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "URL을 단축하지 못했어요. 잠시 후 다시 시도해주세요", { id });
@@ -621,39 +776,65 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
     finally { setIsSaving(false); }
   };
 
-  const getAdvancedOptions = (field: string, fallback: string[]) => {
-    const vals = presets.filter((p) => p.field === field).map((p) => p.value);
-    return vals.length > 0 ? vals : fallback;
-  };
-  const hasPresets = (field: string) => presets.some((p) => p.field === field);
+  const sourcePresetOptions = useMemo(
+    () => presets.filter((p) => p.field === "source").map((p) => ({ label: p.label || p.value, value: p.value })),
+    [presets]
+  );
+  const mediumPresetOptions = useMemo(
+    () => presets.filter((p) => p.field === "medium").map((p) => ({ label: p.label || p.value, value: p.value })),
+    [presets]
+  );
+  const campaignPresetOptions = useMemo(
+    () => presets.filter((p) => p.field === "campaign").map((p) => ({ label: p.label || p.value, value: p.value })),
+    [presets]
+  );
 
-  const basicSources = presets.some((p) => p.field === "source")
-    ? presets.filter((p) => p.field === "source").map((p) => ({ label: p.label || p.value, value: p.value }))
-    : BASIC_SOURCES;
+  const basicSources = useMemo(
+    () => sourcePresetOptions.length > 0 ? sourcePresetOptions : BASIC_SOURCES,
+    [sourcePresetOptions]
+  );
 
-  const basicMediums = presets.some((p) => p.field === "medium")
-    ? presets.filter((p) => p.field === "medium").map((p) => ({ label: p.label || p.value, value: p.value, desc: "" }))
-    : BASIC_MEDIUMS;
+  const basicMediums = useMemo(
+    () => mediumPresetOptions.length > 0
+      ? mediumPresetOptions.map((m) => ({ ...m, desc: "" }))
+      : BASIC_MEDIUMS,
+    [mediumPresetOptions]
+  );
 
-  const existingCampaigns = useMemo(() =>
-    [...new Set(existingLinks.map((l) => l.utmCampaign))].sort(),
-    [existingLinks]
+  const campaignSuggestions = useMemo(
+    () => uniqueValues(campaignPresetOptions.map((option) => option.value)),
+    [campaignPresetOptions]
+  );
+
+  const campaignSelectOptions = useMemo(() => {
+    const presetLabelByValue = new Map(campaignPresetOptions.map((option) => [option.value, option.label]));
+    return campaignSuggestions.map((value) => ({ value, label: presetLabelByValue.get(value) || value }));
+  }, [campaignPresetOptions, campaignSuggestions]);
+
+  const sourceSuggestions = useMemo(
+    () => basicSources.map((source) => source.value),
+    [basicSources]
+  );
+  const mediumSuggestions = useMemo(
+    () => basicMediums.map((medium) => medium.value),
+    [basicMediums]
   );
 
   const campaignIssue = form.campaign && hasCampaignFormatIssue(form.campaign);
+  const showCustomCampaignInput = campaignEntryMode === "custom" || (!!form.campaign && !campaignSuggestions.includes(form.campaign));
 
-  const UrlPreview = () => (
+  const UrlPreview = ({ url }: { url: string }) => (
     <AnimatePresence>
-      {generatedUrl && (
+      {url && (
         <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
           className="rounded-xl border border-border bg-secondary/40 p-4 space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
               <Link2 className="w-3.5 h-3.5 text-violet-500" />생성된 URL
             </span>
-            <CopyButton text={generatedUrl} />
+            <CopyButton text={url} />
           </div>
-          <p className="text-[11px] text-muted-foreground break-all font-mono leading-relaxed">{generatedUrl}</p>
+          <p className="text-[11px] text-muted-foreground break-all font-mono leading-relaxed">{url}</p>
           <div className="pt-2 border-t border-border space-y-2">
             {shortUrl ? (
               <div className="flex items-center justify-between gap-2">
@@ -661,14 +842,14 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
                 <CopyButton text={shortUrl} />
               </div>
             ) : (
-              <button onClick={handleShorten} disabled={isShortening}
+              <button onClick={() => handleShorten(url)} disabled={isShortening}
                 className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 disabled:opacity-40 transition-colors">
                 <Link2 className="w-3 h-3" />{isShortening ? "단축 중..." : "단축 URL 생성 (선택)"}
               </button>
             )}
             {showQR ? (
               <div className="flex items-center gap-3">
-                <div className="bg-white rounded-xl p-2"><QRCodeSVG id="qr-drawer" value={generatedUrl} size={80} /></div>
+                <div className="bg-white rounded-xl p-2"><QRCodeSVG id="qr-drawer" value={url} size={80} /></div>
                 <button onClick={() => {
                   const svg = document.getElementById("qr-drawer");
                   if (!svg) return;
@@ -724,7 +905,7 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
               {!isEdit && !duplicateFrom && (
                 <div className="flex items-center gap-1 p-1 bg-secondary rounded-xl w-fit">
                   {(["basic", "advanced"] as const).map((m) => (
-                    <motion.button key={m} onClick={() => setMode(m)}
+                    <motion.button key={m} onClick={() => handleModeChange(m)}
                       className={`relative px-4 py-1.5 rounded-lg text-xs font-medium transition-colors ${mode === m ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
                       {mode === m && <motion.div layoutId="mode-bg" className="absolute inset-0 bg-background rounded-lg shadow-sm" style={{ zIndex: 0 }} />}
                       <span className="relative z-10">{m === "basic" ? "기본 모드" : "고급 모드"}</span>
@@ -831,19 +1012,28 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
 
                     {/* 캠페인 이름 */}
                     <Field label="캠페인 이름" required hint="언더바(_)로 단어를 구분해요">
-                      {existingCampaigns.length > 0 ? (
+                      {campaignSuggestions.length > 0 ? (
                         <div className="space-y-2">
                           <Select
-                            value={existingCampaigns.includes(form.campaign) ? form.campaign : form.campaign ? "__custom__" : ""}
-                            onChange={(v) => { if (v !== "__custom__") { set("campaign")(v); setAppliedTemplate(null); } else set("campaign")(""); }}
+                            value={showCustomCampaignInput ? "__custom__" : form.campaign}
+                            onChange={(v) => {
+                              if (v !== "__custom__") {
+                                setCampaignEntryMode("select");
+                                set("campaign")(v);
+                                setAppliedTemplate(null);
+                                return;
+                              }
+                              setCampaignEntryMode("custom");
+                              set("campaign")("");
+                            }}
                             options={[
-                              ...existingCampaigns.map((c) => ({ value: c, label: c })),
+                              ...campaignSelectOptions,
                               { value: "__custom__", label: "직접 입력", dividerBefore: true },
                             ]}
                             placeholder="캠페인 선택"
                           />
                           <AnimatePresence>
-                            {(!existingCampaigns.includes(form.campaign)) && (
+                            {showCustomCampaignInput && (
                               <motion.input initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
                                 type="text" placeholder="예: 2025_여름_이벤트" value={form.campaign}
                                 onChange={(e) => { set("campaign")(e.target.value); setAppliedTemplate(null); }}
@@ -870,12 +1060,17 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
                       </AnimatePresence>
                     </Field>
 
-                    <UrlPreview />
+                    <UrlPreview url={generatedUrl} />
                   </motion.div>
                 )}
                 {!isEdit && !duplicateFrom && mode === "advanced" && (
                   <motion.div key="advanced" initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }}
                     transition={{ duration: 0.18 }} className="space-y-4">
+
+                    <Field label="이름 (선택)">
+                      <input type="text" placeholder="예: 2025 여름 구글 검색 광고" value={form.name}
+                        onChange={(e) => set("name")(e.target.value)} className={inputCls} />
+                    </Field>
 
                     <Field label="랜딩 페이지 URL (여러 개 가능)" required>
                       <TagInput tags={advUrls} onChange={setAdvUrls}
@@ -885,18 +1080,23 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
                     <Field label="utm_source (여러 개 가능)" required>
                       <TagInput tags={advSources} onChange={setAdvSources}
                         placeholder="입력 후 Enter — 예: google"
-                        suggestions={basicSources.map((s) => s.value)} />
+                        suggestions={sourceSuggestions} />
                     </Field>
 
                     <Field label="utm_medium (여러 개 가능)" required>
                       <TagInput tags={advMediums} onChange={setAdvMediums}
                         placeholder="입력 후 Enter — 예: cpc"
-                        suggestions={basicMediums.map((m) => m.value)} />
+                        suggestions={mediumSuggestions} />
                     </Field>
 
                     <Field label="utm_campaign" required>
                       <input type="text" placeholder="예: 2025_여름_프로모션" value={form.campaign}
                         onChange={(e) => { set("campaign")(e.target.value); setAppliedTemplate(null); }} className={inputCls} />
+                      <SuggestionChips
+                        options={campaignSuggestions}
+                        value={form.campaign}
+                        onSelect={(campaign) => { set("campaign")(campaign); setAppliedTemplate(null); }}
+                      />
                       <AnimatePresence>
                         {campaignIssue && (
                           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
@@ -920,6 +1120,8 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
                       <input type="text" placeholder="예: 배너_상단" value={form.content}
                         onChange={(e) => set("content")(e.target.value)} className={inputCls} />
                     </Field>
+
+                    <UrlPreview url={advancedGeneratedUrl} />
 
                     {/* 조합 미리보기 */}
                     <AnimatePresence>
@@ -1036,6 +1238,9 @@ export default function UTMBuilderPage() {
 
   useEffect(() => { fetchLinks(); }, [fetchLinks]);
   useEffect(() => { fetchPresetsAndTemplates(); }, [fetchPresetsAndTemplates]);
+  useEffect(() => {
+    if (drawerOpen) fetchPresetsAndTemplates();
+  }, [drawerOpen, fetchPresetsAndTemplates]);
 
   const years    = useMemo(() => [...new Set(savedLinks.map((l) => kstYear(l.createdAt)))].sort().reverse(), [savedLinks]);
   const sources  = useMemo(() => [...new Set(savedLinks.map((l) => l.utmSource))].sort(), [savedLinks]);

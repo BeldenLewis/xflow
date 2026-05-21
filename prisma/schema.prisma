@@ -124,7 +124,7 @@ model Project {
 model UTMPreset {
   id          String    @id @default(cuid())
   workspaceId String
-  field       String    // "source" | "medium" | "term" | "content"
+  field       String    // "source" | "medium" | "campaign"
   value       String
   label       String?   // 기본 모드 드롭다운에 표시될 이름 (예: "구글" → value: "google")
   sortOrder   Int       @default(0)

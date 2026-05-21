@@ -66,7 +66,7 @@ interface ImportResult {
   error?: string;
 }
 
-const IMPORT_BATCH_SIZE = 3000;
+const IMPORT_BATCH_SIZE = 10000;
 
 function normalize(s: string) {
   return s.trim().toLowerCase().replace(/\s+/g, "").replace(/[_\-/().]/g, "");

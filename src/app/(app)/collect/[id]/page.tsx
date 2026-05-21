@@ -172,6 +172,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
   const [redirectUrl, setRedirectUrl] = useState("");
 
   const [script, setScript] = useState<string | null>(null);
+  const [utmScript, setUtmScript] = useState<string | null>(null);
   const [scriptLoading, setScriptLoading] = useState(false);
   const [browserOrigin, setBrowserOrigin] = useState("");
   // console sniffer paste
@@ -343,6 +344,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
       const res = await fetch(`/api/collect-sources/${id}/script`);
       const data = await res.json();
       setScript(data.script ?? "");
+      setUtmScript(data.utmScript ?? "");
     } finally {
       setScriptLoading(false);
     }
@@ -1095,12 +1097,44 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                 </div>
               </div>
 
+              {/* 공통 UTM 보존 코드 */}
+              <div>
+                <div className="mb-3 p-4 rounded-2xl border border-border bg-violet-500/5 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium mb-1">1. 공통 UTM 보존 코드</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      사이트 전체 공통 헤더/푸터에 한 번만 설치하세요. 사용자가 다른 페이지를 둘러보다가 등록해도 UTM을 30일 동안 이어받습니다.
+                    </p>
+                  </div>
+                  <Globe className="w-4 h-4 text-violet-500 shrink-0 mt-0.5" />
+                </div>
+                {scriptLoading ? (
+                  <div className="flex items-center justify-center h-32">
+                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : utmScript ? (
+                  <div className="relative">
+                    <div className="absolute top-3 right-3 z-10">
+                      <CopyButton text={`<script>\n${utmScript}\n</script>`} />
+                    </div>
+                    <pre className="p-4 rounded-2xl bg-secondary border border-border text-xs font-mono overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                      {`<script>\n${utmScript}\n</script>`}
+                    </pre>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <Code2 className="w-8 h-8 text-muted-foreground/20 mb-3" />
+                    <p className="text-sm text-muted-foreground">UTM 보존 코드가 아직 생성되지 않았어요</p>
+                  </div>
+                )}
+              </div>
+
               {/* 실제 수집 스크립트 */}
               <div>
                 <div className="mb-3 p-4 rounded-2xl border border-border bg-secondary/30 flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-medium mb-1">아임웹 설치</p>
-                    <p className="text-xs text-muted-foreground">관리자 → 사이트 설정 → 사용자 정의 코드 → &lt;/body&gt; 앞에 붙여넣기</p>
+                    <p className="text-sm font-medium mb-1">2. 실제 수집 스크립트</p>
+                    <p className="text-xs text-muted-foreground">등록 폼이 있는 페이지의 사용자 정의 코드 → &lt;/body&gt; 앞에 붙여넣기</p>
                   </div>
                   <button
                     onClick={() => setShowTest(true)}

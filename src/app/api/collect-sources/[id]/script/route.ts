@@ -26,6 +26,134 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     .map((f) => `    { index: ${f.index}, key: ${JSON.stringify(f.key)}, label: ${JSON.stringify(f.label)} }`)
     .join(",\n");
 
+  const utmScript = `(function() {
+  var UTM_LAST_KEY  = "mach_utm";
+  var UTM_FIRST_KEY = "mach_utm_first";
+  var LEGACY_UTM_LAST_KEY  = "x" + "flow_utm";
+  var LEGACY_UTM_FIRST_KEY = "x" + "flow_utm_first";
+  var UTM_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+  var UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"];
+
+  function emptyUtm() { return { utmSource:"", utmMedium:"", utmCampaign:"", utmTerm:"", utmContent:"", referrer:"", seenAt:"" }; }
+
+  function storageGet(key) {
+    try {
+      var raw = localStorage.getItem(key);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (parsed && parsed._exp && parsed._exp > Date.now()) return parsed.v;
+        if (parsed && !parsed._exp) return parsed;
+      }
+    } catch(e) {}
+    try {
+      var raw2 = sessionStorage.getItem(key);
+      if (raw2) {
+        var p2 = JSON.parse(raw2);
+        return (p2 && p2.v) ? p2.v : p2;
+      }
+    } catch(e) {}
+    try {
+      var cookies = document.cookie ? document.cookie.split(";") : [];
+      for (var i = 0; i < cookies.length; i++) {
+        var c = cookies[i].replace(/^\\s+/, "");
+        if (c.indexOf(key + "=") === 0) return JSON.parse(decodeURIComponent(c.substring(key.length + 1)));
+      }
+    } catch(e) {}
+    return null;
+  }
+
+  function storageSet(key, value, ttlMs) {
+    var payload = JSON.stringify({ v: value, _exp: Date.now() + ttlMs });
+    try { localStorage.setItem(key, payload); } catch(e) {}
+    try { sessionStorage.setItem(key, payload); } catch(e) {}
+    try {
+      var maxAge = Math.floor(ttlMs / 1000);
+      document.cookie = key + "=" + encodeURIComponent(JSON.stringify(value)) + ";path=/;max-age=" + maxAge + ";SameSite=Lax";
+    } catch(e) {}
+  }
+
+  function migrateLegacyUtm() {
+    if (!storageGet(UTM_LAST_KEY)) {
+      var legacyLast = storageGet(LEGACY_UTM_LAST_KEY);
+      if (legacyLast) storageSet(UTM_LAST_KEY, legacyLast, UTM_TTL_MS);
+    }
+    if (!storageGet(UTM_FIRST_KEY)) {
+      var legacyFirst = storageGet(LEGACY_UTM_FIRST_KEY);
+      if (legacyFirst) storageSet(UTM_FIRST_KEY, legacyFirst, UTM_TTL_MS);
+    }
+  }
+
+  function param(params, key) {
+    return params.get(key) || params.get(key.toUpperCase()) || params.get(key.replace(/_([a-z])/g, function(_, c) { return c.toUpperCase(); })) || "";
+  }
+
+  function hasAnyUtm(params) {
+    for (var i = 0; i < UTM_KEYS.length; i++) {
+      if (param(params, UTM_KEYS[i])) return true;
+    }
+    return false;
+  }
+
+  function readUrlUtm() {
+    var params = new URLSearchParams(window.location.search);
+    if (!hasAnyUtm(params)) return null;
+    return {
+      utmSource:   param(params, "utm_source"),
+      utmMedium:   param(params, "utm_medium"),
+      utmCampaign: param(params, "utm_campaign"),
+      utmTerm:     param(params, "utm_term"),
+      utmContent:  param(params, "utm_content"),
+      referrer:    document.referrer || "",
+      seenAt:      new Date().toISOString()
+    };
+  }
+
+  function getStoredUtm() {
+    return storageGet(UTM_LAST_KEY) || storageGet(UTM_FIRST_KEY) || emptyUtm();
+  }
+
+  function sameSiteHost(a, b) {
+    return String(a || "").replace(/^www\\./, "") === String(b || "").replace(/^www\\./, "");
+  }
+
+  function appendUtmToLink(anchor) {
+    var utm = getStoredUtm();
+    if (!utm.utmSource && !utm.utmMedium && !utm.utmCampaign && !utm.utmTerm && !utm.utmContent) return;
+    try {
+      var url = new URL(anchor.getAttribute("href"), window.location.href);
+      if (!/^https?:$/.test(url.protocol)) return;
+      if (!sameSiteHost(url.hostname, window.location.hostname)) return;
+      var params = url.searchParams;
+      if (!params.get("utm_source") && utm.utmSource) params.set("utm_source", utm.utmSource);
+      if (!params.get("utm_medium") && utm.utmMedium) params.set("utm_medium", utm.utmMedium);
+      if (!params.get("utm_campaign") && utm.utmCampaign) params.set("utm_campaign", utm.utmCampaign);
+      if (!params.get("utm_term") && utm.utmTerm) params.set("utm_term", utm.utmTerm);
+      if (!params.get("utm_content") && utm.utmContent) params.set("utm_content", utm.utmContent);
+      anchor.href = url.toString();
+    } catch(e) {}
+  }
+
+  function captureUtm() {
+    var urlUtm = readUrlUtm();
+    if (!urlUtm) return;
+    storageSet(UTM_LAST_KEY, urlUtm, UTM_TTL_MS);
+    if (!storageGet(UTM_FIRST_KEY)) storageSet(UTM_FIRST_KEY, urlUtm, UTM_TTL_MS);
+  }
+
+  migrateLegacyUtm();
+  captureUtm();
+
+  document.addEventListener("click", function(e) {
+    var target = e.target;
+    var anchor = target && target.closest ? target.closest("a[href]") : null;
+    if (anchor) appendUtmToLink(anchor);
+  }, true);
+
+  window.MachUtm = window.MachUtm || {};
+  window.MachUtm.capture = captureUtm;
+  window.MachUtm.get = function() { return { last: storageGet(UTM_LAST_KEY) || emptyUtm(), first: storageGet(UTM_FIRST_KEY) || emptyUtm() }; };
+})();`;
+
   const script = `(function() {
   var COLLECT_URL = ${JSON.stringify(collectUrl)};
   var API_KEY = ${JSON.stringify(source.apiKey)};
@@ -115,7 +243,7 @@ ${fieldMap}
 
   function readUrlUtm() {
     var params = new URLSearchParams(window.location.search);
-    if (!params.get("utm_source")) return null;
+    if (!params.get("utm_source") && !params.get("utm_medium") && !params.get("utm_campaign") && !params.get("utm_term") && !params.get("utm_content")) return null;
     return {
       utmSource:   params.get("utm_source")   || "",
       utmMedium:   params.get("utm_medium")   || "",
@@ -313,5 +441,5 @@ ${fieldMap}
   observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
 })();`;
 
-  return NextResponse.json({ script });
+  return NextResponse.json({ script, utmScript });
 }

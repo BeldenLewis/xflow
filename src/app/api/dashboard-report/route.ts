@@ -33,12 +33,12 @@ const VISITOR_DIMENSIONS = [
   {
     key: "role",
     label: "직무/직책",
-    candidates: ["jobTitle", "job_title", "position", "role", "직책", "직함", "직급", "부서", "department", "담당업무"],
+    candidates: ["jobTitle", "job_title", "position", "role", "title", "직책", "직함", "직급", "직위", "부서", "department", "담당업무"],
   },
   {
     key: "interest",
     label: "관심 분야",
-    candidates: ["interest", "interests", "관심", "관심 제품", "관심분야", "관심 분야", "참관목적", "방문 목적", "visit_purpose"],
+    candidates: ["interest", "interests", "관심", "관심 제품", "관심분야", "관심 분야", "참관목적", "참관 목적", "참관 희망 전시회", "희망 전시회", "전시회", "방문 목적", "visit_purpose"],
   },
   {
     key: "company",
@@ -143,7 +143,7 @@ function buildWhere(params: {
 }
 
 function normalizeKey(key: string) {
-  return key.replace(/\s+/g, "").replace(/[()[\]{}_\-./]/g, "").toLowerCase();
+  return key.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
 }
 
 function hasMeaningfulKstTime(date: Date) {
@@ -270,9 +270,16 @@ function splitValues(value: unknown): string[] {
 function pickValue(data: Prisma.JsonValue, candidates: readonly string[]) {
   if (!data || typeof data !== "object" || Array.isArray(data)) return [];
   const record = data as Record<string, unknown>;
-  const normalizedCandidates = new Set(candidates.map(normalizeKey));
-  for (const [key, value] of Object.entries(record)) {
-    if (normalizedCandidates.has(normalizeKey(key))) return splitValues(value);
+  const normalizedCandidates = candidates.map(normalizeKey).filter((candidate) => candidate.length > 1);
+  const entries = Object.entries(record).map(([key, value]) => ({ key, value, normalizedKey: normalizeKey(key) }));
+
+  for (const candidate of normalizedCandidates) {
+    const matched = entries.find(({ normalizedKey }) => (
+      normalizedKey === candidate ||
+      normalizedKey.includes(candidate) ||
+      candidate.includes(normalizedKey)
+    ));
+    if (matched) return splitValues(matched.value);
   }
   return [];
 }

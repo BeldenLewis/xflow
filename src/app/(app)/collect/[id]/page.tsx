@@ -111,6 +111,24 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
   );
 }
 
+function CopyCodeButton({ text, label = "코드 복사" }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <button
+      onClick={handleCopy}
+      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-violet-500 text-white text-xs font-medium hover:bg-violet-600 transition-colors"
+    >
+      {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+      {copied ? "복사됨" : label}
+    </button>
+  );
+}
+
 function timeStr(dateStr: string) {
   return formatKst(dateStr, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
@@ -1099,27 +1117,34 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
 
               {/* 공통 UTM 보존 코드 */}
               <div>
-                <div className="mb-3 p-4 rounded-2xl border border-border bg-violet-500/5 flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium mb-1">1. 공통 UTM 보존 코드</p>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      사이트 전체 공통 헤더/푸터에 한 번만 설치하세요. 사용자가 다른 페이지를 둘러보다가 등록해도 UTM을 30일 동안 이어받습니다.
-                    </p>
-                  </div>
-                  <Globe className="w-4 h-4 text-violet-500 shrink-0 mt-0.5" />
-                </div>
                 {scriptLoading ? (
                   <div className="flex items-center justify-center h-32">
                     <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
                   </div>
                 ) : utmScript ? (
-                  <div className="relative">
-                    <div className="absolute top-3 right-3 z-10">
-                      <CopyButton text={`<script>\n${utmScript}\n</script>`} />
+                  <div className="rounded-2xl border border-border bg-violet-500/5 p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <Globe className="w-4 h-4 text-violet-500 shrink-0" />
+                          <p className="text-sm font-medium">1. 공통 UTM 보존 코드</p>
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-relaxed mt-1">
+                          사이트 전체 공통 헤더/푸터에 한 번만 설치하세요. 사용자가 다른 페이지를 둘러보다가 등록해도 UTM을 30일 동안 이어받습니다.
+                        </p>
+                      </div>
+                      <CopyCodeButton text={`<script>\n${utmScript}\n</script>`} />
                     </div>
-                    <pre className="p-4 rounded-2xl bg-secondary border border-border text-xs font-mono overflow-x-auto whitespace-pre-wrap leading-relaxed">
-                      {`<script>\n${utmScript}\n</script>`}
-                    </pre>
+                    <details className="group">
+                      <summary className="cursor-pointer list-none text-xs font-medium text-muted-foreground hover:text-foreground">
+                        코드 미리보기
+                        <span className="ml-1 text-muted-foreground/60 group-open:hidden">펼치기</span>
+                        <span className="ml-1 text-muted-foreground/60 hidden group-open:inline">접기</span>
+                      </summary>
+                      <pre className="mt-3 max-h-64 overflow-auto p-4 rounded-2xl bg-secondary border border-border text-xs font-mono whitespace-pre-wrap leading-relaxed">
+                        {`<script>\n${utmScript}\n</script>`}
+                      </pre>
+                    </details>
                   </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -1131,30 +1156,40 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
 
               {/* 실제 수집 스크립트 */}
               <div>
-                <div className="mb-3 p-4 rounded-2xl border border-border bg-secondary/30 flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium mb-1">2. 실제 수집 스크립트</p>
-                    <p className="text-xs text-muted-foreground">등록 폼이 있는 페이지의 사용자 정의 코드 → &lt;/body&gt; 앞에 붙여넣기</p>
-                  </div>
-                  <button
-                    onClick={() => setShowTest(true)}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-violet-500 text-white text-xs font-medium hover:bg-violet-600 transition-colors shrink-0"
-                  >
-                    <Activity className="w-3.5 h-3.5" />설치 테스트
-                  </button>
-                </div>
                 {scriptLoading ? (
                   <div className="flex items-center justify-center h-32">
                     <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
                   </div>
                 ) : script ? (
-                  <div className="relative">
-                    <div className="absolute top-3 right-3 z-10">
-                      <CopyButton text={`<script>\n${script}\n</script>`} />
+                  <div className="rounded-2xl border border-border bg-secondary/30 p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <Code2 className="w-4 h-4 text-violet-500 shrink-0" />
+                          <p className="text-sm font-medium">2. 실제 수집 스크립트</p>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">등록 폼이 있는 페이지의 사용자 정의 코드 → &lt;/body&gt; 앞에 붙여넣기</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => setShowTest(true)}
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border bg-background text-xs font-medium hover:bg-secondary transition-colors"
+                        >
+                          <Activity className="w-3.5 h-3.5" />설치 테스트
+                        </button>
+                        <CopyCodeButton text={`<script>\n${script}\n</script>`} />
+                      </div>
                     </div>
-                    <pre className="p-4 rounded-2xl bg-secondary border border-border text-xs font-mono overflow-x-auto whitespace-pre-wrap leading-relaxed">
-                      {`<script>\n${script}\n</script>`}
-                    </pre>
+                    <details className="group">
+                      <summary className="cursor-pointer list-none text-xs font-medium text-muted-foreground hover:text-foreground">
+                        코드 미리보기
+                        <span className="ml-1 text-muted-foreground/60 group-open:hidden">펼치기</span>
+                        <span className="ml-1 text-muted-foreground/60 hidden group-open:inline">접기</span>
+                      </summary>
+                      <pre className="mt-3 max-h-64 overflow-auto p-4 rounded-2xl bg-secondary border border-border text-xs font-mono whitespace-pre-wrap leading-relaxed">
+                        {`<script>\n${script}\n</script>`}
+                      </pre>
+                    </details>
                   </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center py-12 text-center">

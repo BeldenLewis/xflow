@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useRef } from "react";
-import { Plus, Edit3, Eye, RefreshCw, Loader2, LayoutDashboard, Sparkles, Filter, X, Copy } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Plus, Edit3, Eye, RefreshCw, Loader2, LayoutDashboard, Sparkles, Filter, X } from "lucide-react";
 import { toast } from "sonner";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy, useSortable } from "@dnd-kit/sortable";
@@ -24,6 +24,7 @@ import AutoInsightWidget from "./widgets/AutoInsightWidget";
 import BoardTabs, { DashboardSummary } from "./BoardTabs";
 import ShareModal from "./ShareModal";
 import ReportsModal from "./ReportsModal";
+import RealtimeReport, { type RealtimeReportData } from "./RealtimeReport";
 import { Widget, WidgetWidth, SourceOption, DashboardFilters } from "./widgets/types";
 import { formatKstDateTime, kstDateString } from "@/lib/datetime";
 
@@ -136,6 +137,8 @@ export default function DashboardPage() {
   const [widgetData, setWidgetData] = useState<Record<string, unknown>>({});
   const [widgetLoading, setWidgetLoading] = useState<Record<string, boolean>>({});
   const [widgetUpdatedAt, setWidgetUpdatedAt] = useState<Record<string, string>>({});
+  const [reportData, setReportData] = useState<RealtimeReportData | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
 
   // 글로벌 필터
@@ -186,6 +189,38 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchBoards(); }, [fetchBoards]);
   useEffect(() => { fetchWidgets(); }, [fetchWidgets]);
+
+  const fetchReport = useCallback(async () => {
+    if (!workspace || !currentProject) return;
+    setReportLoading(true);
+    try {
+      const res = await fetch("/api/dashboard-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: workspace.id,
+          projectId: currentProject.id,
+          from: range.from.toISOString(),
+          to: range.to.toISOString(),
+          filters,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok) {
+        setReportData(data);
+      } else {
+        console.error("[dashboard-report] failed", data);
+      }
+    } catch (error) {
+      console.error("[dashboard-report] failed", error);
+    } finally {
+      setReportLoading(false);
+    }
+  }, [workspace, currentProject, range, filters]);
+
+  useEffect(() => {
+    fetchReport();
+  }, [fetchReport, refreshTick]);
 
   const fetchWidgetData = useCallback(async (widget: Widget) => {
     if (!workspace || !currentProject) return;
@@ -380,8 +415,8 @@ export default function DashboardPage() {
     <div className="p-8 space-y-4">
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div className="flex-1 min-w-0">
-          <h1 className="text-2xl font-semibold">대시보드</h1>
-          <p className="text-sm text-muted-foreground mt-1">{currentProject.name}</p>
+          <h1 className="text-2xl font-semibold">실시간 보고서</h1>
+          <p className="text-sm text-muted-foreground mt-1">{currentProject.name}의 등록 흐름과 전시팀 인사이트를 요약합니다</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <DateRangePicker value={range} onChange={setRange} />
@@ -397,18 +432,28 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      <RealtimeReport data={reportData} loading={reportLoading} rangeLabel={range.label} />
+
       {/* 보드 탭 */}
       {workspace && currentProject && dashboards.length > 0 && activeDashboardId && (
-        <BoardTabs
-          workspaceId={workspace.id}
-          projectId={currentProject.id}
-          dashboards={dashboards}
-          activeId={activeDashboardId}
-          onSelect={setActiveDashboardId}
-          onChange={fetchBoards}
-          onOpenShare={setShareDashboard}
-          onOpenReports={setReportsDashboard}
-        />
+        <div className="pt-2 space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="text-sm font-semibold">상세 위젯 보드</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">필요할 때만 깊게 보는 세부 분석 영역입니다</p>
+            </div>
+          </div>
+          <BoardTabs
+            workspaceId={workspace.id}
+            projectId={currentProject.id}
+            dashboards={dashboards}
+            activeId={activeDashboardId}
+            onSelect={setActiveDashboardId}
+            onChange={fetchBoards}
+            onOpenShare={setShareDashboard}
+            onOpenReports={setReportsDashboard}
+          />
+        </div>
       )}
 
       {/* 글로벌 필터 바 */}
@@ -470,12 +515,16 @@ export default function DashboardPage() {
       {loading ? (
         <div className="flex items-center justify-center h-64"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
       ) : !hasWidgets ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <LayoutDashboard className="w-12 h-12 text-muted-foreground/20 mb-4" />
-          <h3 className="text-base font-medium mb-1">아직 위젯이 없어요</h3>
-          <p className="text-sm text-muted-foreground mb-5 max-w-md">
-            이 프로젝트의 수집 데이터를 한눈에 볼 수 있는 마케팅 대시보드를 만들어보세요
-          </p>
+        <div className="flex items-center justify-between gap-4 flex-wrap rounded-2xl border border-border bg-secondary/10 p-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-background border border-border text-muted-foreground">
+              <LayoutDashboard className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-medium">상세 위젯 보드가 비어 있어요</h3>
+              <p className="text-xs text-muted-foreground mt-1">보고서는 바로 읽고, 필요하면 위젯을 추가해 깊게 분석할 수 있습니다.</p>
+            </div>
+          </div>
           <div className="flex items-center gap-2">
             <button onClick={handleQuickStart} className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors">
               <Sparkles className="w-3.5 h-3.5" />기본 보드로 시작

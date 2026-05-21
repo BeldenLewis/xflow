@@ -32,6 +32,31 @@ interface ParsedSheet {
   headers: string[];
   rows: string[][]; // string-converted values
   rawRows: unknown[][]; // for date detection
+  headerRowIndex: number;
+}
+
+interface UpdateOption {
+  key: string;
+  label: string;
+  defaultSelected: boolean;
+}
+
+interface ImportPayload {
+  data: Record<string, string>;
+  createdAt?: string;
+  utmSource?: string;
+  utmMedium?: string;
+  utmCampaign?: string;
+  utmTerm?: string;
+  utmContent?: string;
+  referrer?: string;
+}
+
+interface ImportDiagnostics {
+  totalRows: number;
+  importableRows: number;
+  mappedColumns: number;
+  parsedCreatedAtRows: number;
 }
 
 function normalize(s: string) {
@@ -88,6 +113,205 @@ function valueToTarget(v: string): ColumnTarget {
   }
 }
 
+function isBlankCell(value: unknown) {
+  return value === null || value === undefined || String(value).trim() === "";
+}
+
+function excelSerialDateToISO(value: number): string | undefined {
+  if (!Number.isFinite(value) || value < 20000 || value > 80000) return undefined;
+  const utcDays = Math.floor(value - 25569);
+  const utcValue = utcDays * 86400;
+  const fractionalDay = value - Math.floor(value) + 0.0000001;
+  const totalSeconds = Math.floor(86400 * fractionalDay);
+  const d = new Date((utcValue + totalSeconds) * 1000);
+  return isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
+function parseImportDate(value: unknown): string | undefined {
+  if (typeof value === "number") return excelSerialDateToISO(value);
+  if (value instanceof Date) return value.toISOString();
+  const raw = String(value ?? "")
+    .trim()
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\s+/g, " ");
+  if (!raw) return undefined;
+
+  const explicitZone = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(raw);
+  if (explicitZone) {
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? undefined : d.toISOString();
+  }
+
+  const numeric = Number(raw);
+  const serialDate = excelSerialDateToISO(numeric);
+  if (serialDate) return serialDate;
+
+  const normalizedRaw = raw
+    .replace(/시\s*(\d{1,2})\s*분/g, ":$1")
+    .replace(/년/g, "-")
+    .replace(/월/g, "-")
+    .replace(/일/g, " ")
+    .replace(/시/g, ":")
+    .replace(/분/g, "")
+    .replace(/[^\d:./\-\sAPMapm오전후]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const m = normalizedRaw.match(/^(\d{4})[-/.]\s*(\d{1,2})[-/.]\s*(\d{1,2})(?:\s*(?:[T ]|일|\.)\s*)?(?:(오전|오후|AM|PM|am|pm)?\s*(\d{1,2})(?::(\d{0,2}))?(?::(\d{0,2}))?)?/);
+  if (m) {
+    let hour = m[5] ? Number(m[5]) : 0;
+    const minute = m[6] ? Number(m[6].padStart(2, "0")) : 0;
+    const second = m[7] ? Number(m[7].padStart(2, "0")) : 0;
+    const meridiem = m[4]?.toLowerCase();
+
+    if (hour > 23 || minute > 59 || second > 59) return undefined;
+
+    if (meridiem === "오후" || meridiem === "pm") {
+      if (hour < 12) hour += 12;
+    } else if ((meridiem === "오전" || meridiem === "am") && hour === 12) {
+      hour = 0;
+    }
+
+    const iso = `${m[1]}-${String(m[2]).padStart(2, "0")}-${String(m[3]).padStart(2, "0")}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}+09:00`;
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? undefined : d.toISOString();
+  }
+
+  const d = new Date(normalizedRaw);
+  return isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
+function getUpdateKey(target: ColumnTarget): string | null {
+  if (target.kind === "ignore") return null;
+  if (target.kind === "field") return `field:${target.key}`;
+  return target.kind;
+}
+
+function getUpdateLabel(target: ColumnTarget, fieldMappings: FieldMapping[]): string {
+  if (target.kind === "ignore") return "";
+  if (target.kind === "field") {
+    return fieldMappings.find((f) => f.key === target.key)?.label || target.key;
+  }
+  const labels: Record<Exclude<ColumnTarget["kind"], "ignore" | "field">, string> = {
+    createdAt: "신청 시각(createdAt)",
+    utmSource: "UTM 소스",
+    utmMedium: "UTM 매체",
+    utmCampaign: "UTM 캠페인",
+    utmTerm: "UTM 키워드",
+    utmContent: "UTM 콘텐츠",
+    referrer: "Referrer",
+  };
+  return labels[target.kind];
+}
+
+function getUpdateOptions(targets: ColumnTarget[], fieldMappings: FieldMapping[]): UpdateOption[] {
+  const seen = new Set<string>();
+  const options: UpdateOption[] = [];
+  for (const target of targets) {
+    const key = getUpdateKey(target);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    options.push({
+      key,
+      label: getUpdateLabel(target, fieldMappings),
+      defaultSelected: key !== "createdAt",
+    });
+  }
+  return options;
+}
+
+function getDefaultUpdateFields(targets: ColumnTarget[], fieldMappings: FieldMapping[]) {
+  return getUpdateOptions(targets, fieldMappings)
+    .filter((option) => option.defaultSelected)
+    .map((option) => option.key);
+}
+
+function hasImportPayload(record: ImportPayload) {
+  return Object.keys(record.data).length > 0 ||
+    Boolean(
+      record.createdAt ||
+      record.utmSource ||
+      record.utmMedium ||
+      record.utmCampaign ||
+      record.utmTerm ||
+      record.utmContent ||
+      record.referrer,
+    );
+}
+
+function scoreHeaderRow(row: unknown[], fieldMappings: FieldMapping[]) {
+  let score = 0;
+  let nonEmpty = 0;
+  for (const cell of row) {
+    const value = String(cell ?? "").trim();
+    if (!value) continue;
+    nonEmpty++;
+    const normalized = normalize(value);
+    const target = autoMapColumn(value, fieldMappings);
+    if (target.kind !== "ignore") score += 3;
+    if (/(응답시간|신청일|등록일|이메일|메일|연락처|휴대|전화|성함|이름|회사|소속)/.test(normalized)) {
+      score += 2;
+    }
+  }
+  return score + Math.min(nonEmpty, 8) * 0.1;
+}
+
+function detectHeaderRowIndex(rows: unknown[][], fieldMappings: FieldMapping[]) {
+  const candidates = rows.slice(0, Math.min(rows.length, 10));
+  let bestIndex = 0;
+  let bestScore = -1;
+  candidates.forEach((row, index) => {
+    const score = scoreHeaderRow(row, fieldMappings);
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
+  });
+  return bestScore > 0 ? bestIndex : 0;
+}
+
+function buildImportRecords(sheet: ParsedSheet, targets: ColumnTarget[]) {
+  let parsedCreatedAtRows = 0;
+  const records = sheet.rawRows.map((rawRow, rowIndex) => {
+    const data: Record<string, string> = {};
+    const rec: ImportPayload = { data };
+    const displayRow = sheet.rows[rowIndex] ?? [];
+
+    sheet.headers.forEach((_, i) => {
+      const target = targets[i];
+      if (target.kind === "ignore") return;
+      const rawValue = rawRow[i];
+      if (target.kind === "field") {
+        const v = isBlankCell(displayRow[i]) ? rawValue : displayRow[i];
+        if (isBlankCell(v)) return;
+        data[target.key] = v instanceof Date ? v.toISOString() : String(v);
+      } else if (target.kind === "createdAt") {
+        const parsed = parseImportDate(rawValue) ?? parseImportDate(displayRow[i]);
+        if (parsed) {
+          rec.createdAt = parsed;
+          parsedCreatedAtRows++;
+        }
+      } else {
+        const v = isBlankCell(displayRow[i]) ? rawValue : displayRow[i];
+        if (isBlankCell(v)) return;
+        const strVal = v instanceof Date ? v.toISOString() : String(v);
+        rec[target.kind] = strVal;
+      }
+    });
+
+    return rec;
+  }).filter(hasImportPayload);
+
+  const diagnostics: ImportDiagnostics = {
+    totalRows: sheet.rawRows.length,
+    importableRows: records.length,
+    mappedColumns: targets.filter((target) => target.kind !== "ignore").length,
+    parsedCreatedAtRows,
+  };
+
+  return { records, diagnostics };
+}
+
 export default function ImportModal({ sourceId, fieldMappings, onClose, onImported }: ImportModalProps) {
   const [step, setStep] = useState<"upload" | "map">("upload");
   const [parsing, setParsing] = useState(false);
@@ -97,6 +321,7 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
   const [importing, setImporting] = useState(false);
   const [dedupMode, setDedupMode] = useState<"skip" | "merge" | "all">("skip");
   const [mergeKeyField, setMergeKeyField] = useState<string>(fieldMappings[0]?.key ?? "");
+  const [mergeUpdateFields, setMergeUpdateFields] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (file: File) => {
@@ -111,24 +336,35 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
         toast.error("시트를 찾을 수 없어요");
         return;
       }
-      // raw:false → 셀 표시 형식 그대로 가져옴 (예: 휴대폰 010-1234-5678 보존)
-      // cellDates:true 와 함께 쓰면 날짜는 Date 인스턴스, 나머지는 표시된 문자열
-      const rawRows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, blankrows: false, raw: false });
-      if (rawRows.length < 2) {
+      // 표시값은 휴대폰/응답시간처럼 사람이 보는 형식을 보존하고,
+      // 원본값은 엑셀 날짜 serial 값까지 보완하기 위해 따로 읽는다.
+      const displayRowsAll = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, blankrows: false, raw: false, defval: "" });
+      const rawRowsAll = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, blankrows: false, raw: true, defval: "" });
+      if (displayRowsAll.length < 2) {
         toast.error("데이터가 비어있어요 (헤더 + 1행 이상 필요)");
         return;
       }
-      const headers = (rawRows[0] as unknown[]).map((h) => String(h ?? "").trim());
-      const dataRowsRaw = rawRows.slice(1) as unknown[][];
-      const dataRows = dataRowsRaw.map((r) =>
+      const headerRowIndex = detectHeaderRowIndex(displayRowsAll as unknown[][], fieldMappings);
+      const headers = (displayRowsAll[headerRowIndex] as unknown[]).map((h) => String(h ?? "").trim());
+      const displayBodyRows = (displayRowsAll.slice(headerRowIndex + 1) as unknown[][]);
+      const rawBodyRows = (rawRowsAll.slice(headerRowIndex + 1) as unknown[][]);
+      const rowPairs = displayBodyRows
+        .map((displayRow, index) => ({ displayRow, rawRow: rawBodyRows[index] ?? [] }))
+        .filter(({ displayRow, rawRow }) =>
+          headers.some((_, i) => !isBlankCell(displayRow[i]) || !isBlankCell(rawRow[i]))
+        );
+      const dataRowsRaw = rowPairs.map((row) => row.rawRow);
+      const dataRows = rowPairs.map(({ displayRow }) =>
         headers.map((_, i) => {
-          const v = r[i];
+          const v = displayRow[i];
           if (v instanceof Date) return v.toISOString();
           return v === null || v === undefined ? "" : String(v);
         })
       );
-      setSheet({ headers, rows: dataRows, rawRows: dataRowsRaw });
-      setTargets(headers.map((h) => autoMapColumn(h, fieldMappings)));
+      const mappedTargets = headers.map((h) => autoMapColumn(h, fieldMappings));
+      setSheet({ headers, rows: dataRows, rawRows: dataRowsRaw, headerRowIndex });
+      setTargets(mappedTargets);
+      setMergeUpdateFields(getDefaultUpdateFields(mappedTargets, fieldMappings));
       setStep("map");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "파일 파싱 실패");
@@ -139,59 +375,36 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
 
   const handleImport = async () => {
     if (!sheet) return;
-    setImporting(true);
-    try {
-      const records = sheet.rawRows.map((rawRow) => {
-        const data: Record<string, string> = {};
-        const rec: {
-          data: Record<string, string>;
-          createdAt?: string;
-          utmSource?: string;
-          utmMedium?: string;
-          utmCampaign?: string;
-          utmTerm?: string;
-          utmContent?: string;
-          referrer?: string;
-        } = { data };
-
-        sheet.headers.forEach((_, i) => {
-          const target = targets[i];
-          if (target.kind === "ignore") return;
-          const v = rawRow[i];
-          if (v === null || v === undefined || v === "") return;
-          if (target.kind === "field") {
-            data[target.key] = v instanceof Date ? v.toISOString() : String(v);
-          } else if (target.kind === "createdAt") {
-            if (v instanceof Date) rec.createdAt = v.toISOString();
-            else {
-              const d = new Date(String(v));
-              if (!isNaN(d.getTime())) rec.createdAt = d.toISOString();
-            }
-          } else {
-            const strVal = v instanceof Date ? v.toISOString() : String(v);
-            rec[target.kind] = strVal;
-          }
-        });
-
-        return rec;
-      }).filter((r) => Object.keys(r.data).length > 0 || r.createdAt);
-
-      if (records.length === 0) {
-        toast.error("가져올 데이터가 없어요. 매핑을 확인해주세요");
-        return;
-      }
-
-      if (dedupMode === "merge" && !mergeKeyField) {
+    if (dedupMode === "merge") {
+      if (!mergeKeyField) {
         toast.error("업데이트 모드는 기준 필드가 필요해요");
         return;
       }
+      const mergeKeyLabel = fieldMappings.find((f) => f.key === mergeKeyField)?.label ?? mergeKeyField;
+      const hasMergeKeyColumn = targets.some((target) => target.kind === "field" && target.key === mergeKeyField);
+      if (!hasMergeKeyColumn) {
+        toast.error(`기준 필드(${mergeKeyLabel})로 사용할 파일 컬럼을 해당 필드로 매핑해주세요.`);
+        return;
+      }
+    }
+    setImporting(true);
+    try {
+      const { records, diagnostics } = buildImportRecords(sheet, targets);
+
+      if (records.length === 0) {
+        toast.error(
+          `가져올 데이터가 없어요. 헤더 ${sheet.headerRowIndex + 1}행 · 매핑 ${diagnostics.mappedColumns}개 · 날짜 인식 ${diagnostics.parsedCreatedAtRows}건`,
+        );
+        return;
+      }
+
       const res = await fetch(`/api/collect-sources/${sourceId}/records/import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           records,
           mode: dedupMode,
-          ...(dedupMode === "merge" ? { keyField: mergeKeyField } : {}),
+          ...(dedupMode === "merge" ? { keyField: mergeKeyField, updateFields: mergeUpdateFields } : {}),
         }),
       });
       const result = await res.json();
@@ -214,6 +427,8 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
   };
 
   const previewRows = sheet?.rows.slice(0, 3) ?? [];
+  const mergeUpdateOptions = getUpdateOptions(targets, fieldMappings);
+  const importDiagnostics = sheet ? buildImportRecords(sheet, targets).diagnostics : null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
@@ -271,6 +486,9 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
               <div>
                 <p className="text-xs text-muted-foreground mb-2">
                   컬럼 매핑 · 총 <span className="text-foreground font-medium">{sheet.rows.length.toLocaleString()}</span>행 감지됨
+                  {sheet.headerRowIndex > 0 && (
+                    <span> · {sheet.headerRowIndex + 1}번째 줄을 헤더로 인식</span>
+                  )}
                 </p>
                 <div className="space-y-1.5">
                   {sheet.headers.map((header, i) => (
@@ -288,6 +506,12 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
                           const next = [...targets];
                           next[i] = valueToTarget(e.target.value);
                           setTargets(next);
+                          setMergeUpdateFields((current) => {
+                            const options = getUpdateOptions(next, fieldMappings);
+                            const allowed = new Set(options.map((option) => option.key));
+                            const kept = current.filter((key) => allowed.has(key));
+                            return kept.length > 0 ? kept : getDefaultUpdateFields(next, fieldMappings);
+                          });
                         }}
                         className="px-2.5 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400 min-w-[180px]"
                       >
@@ -334,6 +558,27 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                </div>
+              )}
+
+              {importDiagnostics && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="rounded-xl border border-border bg-secondary/30 p-3">
+                    <p className="text-[11px] text-muted-foreground">매핑된 컬럼</p>
+                    <p className="mt-1 text-sm font-semibold">{importDiagnostics.mappedColumns.toLocaleString()}개</p>
+                  </div>
+                  <div className="rounded-xl border border-border bg-secondary/30 p-3">
+                    <p className="text-[11px] text-muted-foreground">가져올 행</p>
+                    <p className="mt-1 text-sm font-semibold">{importDiagnostics.importableRows.toLocaleString()}건</p>
+                  </div>
+                  <div className="rounded-xl border border-border bg-secondary/30 p-3">
+                    <p className="text-[11px] text-muted-foreground">신청시각 인식</p>
+                    <p className="mt-1 text-sm font-semibold">{importDiagnostics.parsedCreatedAtRows.toLocaleString()}건</p>
+                  </div>
+                  <div className="rounded-xl border border-border bg-secondary/30 p-3">
+                    <p className="text-[11px] text-muted-foreground">헤더 위치</p>
+                    <p className="mt-1 text-sm font-semibold">{sheet.headerRowIndex + 1}행</p>
                   </div>
                 </div>
               )}
@@ -393,9 +638,68 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
             </div>
 
             {dedupMode === "merge" && (
-              <p className="text-[11px] text-muted-foreground">
-                같은 <b>{fieldMappings.find((f) => f.key === mergeKeyField)?.label ?? mergeKeyField}</b> 값을 가진 기존 레코드를 찾아 <b>새 파일에서 값이 있는 컬럼만</b> 덮어씁니다. (createdAt 은 보존, 매칭 안 되면 신규 추가)
-              </p>
+              <div className="space-y-2 rounded-xl border border-border bg-background p-3">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <p className="text-xs font-medium">업데이트할 컬럼</p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      같은 <b>{fieldMappings.find((f) => f.key === mergeKeyField)?.label ?? mergeKeyField}</b> 값을 가진 기존 레코드를 찾아, 체크한 컬럼만 새 파일 값으로 갱신합니다.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setMergeUpdateFields(mergeUpdateOptions.map((option) => option.key))}
+                      className="px-2 py-1 rounded-lg border border-border text-[11px] text-muted-foreground hover:text-foreground"
+                    >
+                      전체
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMergeUpdateFields([])}
+                      className="px-2 py-1 rounded-lg border border-border text-[11px] text-muted-foreground hover:text-foreground"
+                    >
+                      해제
+                    </button>
+                  </div>
+                </div>
+                {mergeUpdateOptions.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {mergeUpdateOptions.map((option) => {
+                      const checked = mergeUpdateFields.includes(option.key);
+                      return (
+                        <label
+                          key={option.key}
+                          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs cursor-pointer transition-colors ${
+                            checked
+                              ? "border-violet-500 bg-violet-500/10 text-violet-600"
+                              : "border-border bg-secondary/30 text-muted-foreground"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              setMergeUpdateFields((current) => (
+                                e.target.checked
+                                  ? Array.from(new Set([...current, option.key]))
+                                  : current.filter((key) => key !== option.key)
+                              ));
+                            }}
+                            className="accent-violet-500"
+                          />
+                          {option.label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">업데이트할 수 있는 매핑 컬럼이 없습니다.</p>
+                )}
+                {mergeUpdateFields.length === 0 && (
+                  <p className="text-[11px] text-amber-600">체크된 컬럼이 없으면 기존 레코드는 매칭되어도 갱신되지 않습니다.</p>
+                )}
+              </div>
             )}
 
             <div className="flex items-center justify-between gap-2 pt-1">

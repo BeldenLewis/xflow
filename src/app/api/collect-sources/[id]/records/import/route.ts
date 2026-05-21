@@ -55,6 +55,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const records: unknown = body?.records;
   const mode: DedupMode = body?.mode === "all" ? "all" : body?.mode === "merge" ? "merge" : "skip";
   const keyField: string | undefined = typeof body?.keyField === "string" ? body.keyField : undefined;
+  const updateFields: string[] | undefined = Array.isArray(body?.updateFields)
+    ? body.updateFields.filter((v: unknown): v is string => typeof v === "string")
+    : undefined;
 
   if (!Array.isArray(records) || records.length === 0) {
     return NextResponse.json({ error: "가져올 레코드가 없어요" }, { status: 400 });
@@ -65,6 +68,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (mode === "merge" && !keyField) {
     return NextResponse.json({ error: "업데이트 모드에는 기준 필드(keyField)가 필요해요" }, { status: 400 });
   }
+
+  const shouldUpdate = (fieldKey: string) => {
+    if (!updateFields) return fieldKey !== "createdAt";
+    return updateFields.includes(fieldKey);
+  };
 
   const rows = (records as ImportRecord[]).map((r) => {
     let createdAt: Date | undefined;
@@ -113,7 +121,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     let inserted = 0;
     let updated = 0;
     const toInsert: typeof rows = [];
-    const updates: Array<{ id: string; data: Record<string, string>; utmSource: string | null; utmMedium: string | null; utmCampaign: string | null; utmTerm: string | null; utmContent: string | null; referrer: string | null }> = [];
+    const updates: Array<{ id: string; data: Record<string, string>; createdAt: Date; utmSource: string | null; utmMedium: string | null; utmCampaign: string | null; utmTerm: string | null; utmContent: string | null; referrer: string | null }> = [];
 
     for (const row of rows) {
       const k = normalizeKey(row.data[keyField!]);
@@ -123,26 +131,39 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         toInsert.push(row);
         continue;
       }
+      if (updateFields && updateFields.length === 0) continue;
 
-      // 매칭되는 모든 기존 레코드에 머지 (data + utm/referrer, createdAt 은 보존)
+      // 매칭되는 모든 기존 레코드에 머지. updateFields 가 있으면 선택된 컬럼만 갱신한다.
       for (const targetId of matched) {
         const target = existingById.get(targetId)!;
         const mergedData: Record<string, string> = { ...((target.data ?? {}) as Record<string, string>) };
         for (const [fk, fv] of Object.entries(row.data)) {
-          if (isNonEmpty(fv)) mergedData[fk] = fv;
+          if (isNonEmpty(fv) && shouldUpdate(`field:${fk}`)) mergedData[fk] = fv;
         }
+        const nextCreatedAt = row.createdAt && shouldUpdate("createdAt") ? row.createdAt : target.createdAt;
         updates.push({
           id: targetId,
           data: mergedData,
-          utmSource: isNonEmpty(row.utmSource) ? row.utmSource : target.utmSource,
-          utmMedium: isNonEmpty(row.utmMedium) ? row.utmMedium : target.utmMedium,
-          utmCampaign: isNonEmpty(row.utmCampaign) ? row.utmCampaign : target.utmCampaign,
-          utmTerm: isNonEmpty(row.utmTerm) ? row.utmTerm : target.utmTerm,
-          utmContent: isNonEmpty(row.utmContent) ? row.utmContent : target.utmContent,
-          referrer: isNonEmpty(row.referrer) ? row.referrer : target.referrer,
+          createdAt: nextCreatedAt,
+          utmSource: isNonEmpty(row.utmSource) && shouldUpdate("utmSource") ? row.utmSource : target.utmSource,
+          utmMedium: isNonEmpty(row.utmMedium) && shouldUpdate("utmMedium") ? row.utmMedium : target.utmMedium,
+          utmCampaign: isNonEmpty(row.utmCampaign) && shouldUpdate("utmCampaign") ? row.utmCampaign : target.utmCampaign,
+          utmTerm: isNonEmpty(row.utmTerm) && shouldUpdate("utmTerm") ? row.utmTerm : target.utmTerm,
+          utmContent: isNonEmpty(row.utmContent) && shouldUpdate("utmContent") ? row.utmContent : target.utmContent,
+          referrer: isNonEmpty(row.referrer) && shouldUpdate("referrer") ? row.referrer : target.referrer,
         });
         // 다음 업로드 행이 같은 키로 와도 위에서 머지한 결과를 누적해야 함
-        existingById.set(targetId, { ...target, data: mergedData });
+        existingById.set(targetId, {
+          ...target,
+          data: mergedData,
+          createdAt: nextCreatedAt,
+          utmSource: isNonEmpty(row.utmSource) && shouldUpdate("utmSource") ? row.utmSource : target.utmSource,
+          utmMedium: isNonEmpty(row.utmMedium) && shouldUpdate("utmMedium") ? row.utmMedium : target.utmMedium,
+          utmCampaign: isNonEmpty(row.utmCampaign) && shouldUpdate("utmCampaign") ? row.utmCampaign : target.utmCampaign,
+          utmTerm: isNonEmpty(row.utmTerm) && shouldUpdate("utmTerm") ? row.utmTerm : target.utmTerm,
+          utmContent: isNonEmpty(row.utmContent) && shouldUpdate("utmContent") ? row.utmContent : target.utmContent,
+          referrer: isNonEmpty(row.referrer) && shouldUpdate("referrer") ? row.referrer : target.referrer,
+        });
       }
     }
 
@@ -156,6 +177,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             where: { id: u.id },
             data: {
               data: u.data,
+              createdAt: u.createdAt,
               utmSource: u.utmSource,
               utmMedium: u.utmMedium,
               utmCampaign: u.utmCampaign,
@@ -194,7 +216,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       sourceId: source.id,
       userId: user.id,
       action: "records.imported",
-      meta: { mode: "merge", inserted, updated, keyField },
+      meta: { mode: "merge", inserted, updated, keyField, updateFields: updateFields ?? "default" },
     });
 
     return NextResponse.json({ imported: inserted, updated, skipped: 0 });

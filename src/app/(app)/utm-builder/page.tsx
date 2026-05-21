@@ -344,14 +344,16 @@ function TemplatePicker({ templates, onSelect }: { templates: Template[]; onSele
             <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
             <motion.div initial={{ opacity: 0, y: -6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -6, scale: 0.97 }} transition={{ duration: 0.12 }}
-              className="absolute top-full left-0 mt-1 w-64 bg-background border border-border rounded-2xl shadow-lg z-50 overflow-hidden">
+              className="absolute top-full right-0 mt-2 w-72 max-w-[calc(100vw-2rem)] bg-background border border-border rounded-2xl shadow-lg z-50 overflow-hidden">
               <div className="p-1">
                 <p className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">템플릿</p>
                 {templates.map((t) => (
                   <button key={t.id} onClick={() => { onSelect(t); setOpen(false); }}
                     className="w-full text-left px-3 py-2 rounded-xl hover:bg-secondary transition-colors">
-                    <p className="text-sm font-medium">{t.name}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5 font-mono">{t.source} / {t.medium}{t.campaign ? ` / ${t.campaign}` : ""}</p>
+                    <p className="text-sm font-medium truncate">{t.name}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5 font-mono leading-relaxed whitespace-normal break-words">
+                      {t.source} / {t.medium}{t.campaign ? ` / ${t.campaign}` : ""}
+                    </p>
                   </button>
                 ))}
               </div>
@@ -361,6 +363,10 @@ function TemplatePicker({ templates, onSelect }: { templates: Template[]; onSele
       </AnimatePresence>
     </div>
   );
+}
+
+function getUtmRowTitle(link: Pick<UTMLink, "name" | "url" | "fullUrl">) {
+  return link.name?.trim() || link.url || link.fullUrl;
 }
 
 // ── UTM 목록 행 ────────────────────────────────────────────
@@ -374,6 +380,8 @@ function UTMRow({ link, onDelete, onShortUrlSaved, onEdit, onDuplicate }: {
   const [expanded, setExpanded] = useState(false);
   const [isShortening, setIsShortening] = useState(false);
   const [showQR, setShowQR] = useState(false);
+  const hasName = !!link.name?.trim();
+  const rowTitle = getUtmRowTitle(link);
 
   const handleShorten = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -401,9 +409,12 @@ function UTMRow({ link, onDelete, onShortUrlSaved, onEdit, onDuplicate }: {
           <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
         </motion.div>
 
-        <div className="flex-1 min-w-0 space-y-1">
+        <div className="flex-1 min-w-0 space-y-1.5">
+          <div className="flex items-baseline gap-2 min-w-0">
+            <p className={`text-sm truncate ${hasName ? "font-medium text-foreground shrink-0 max-w-[42%]" : "font-mono text-foreground min-w-0 flex-1"}`}>{rowTitle}</p>
+            {hasName && <p className="text-xs text-muted-foreground truncate font-mono min-w-0 flex-1">{link.url || link.fullUrl}</p>}
+          </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-sm">{link.name || "이름 없음"}</span>
             <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-500 font-medium">{link.utmSource}</span>
             <span className="text-[11px] px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">{link.utmMedium}</span>
             <span className="text-[11px] px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">{link.utmCampaign}</span>
@@ -413,7 +424,6 @@ function UTMRow({ link, onDelete, onShortUrlSaved, onEdit, onDuplicate }: {
               </span>
             )}
           </div>
-          <p className="text-xs text-muted-foreground truncate font-mono">{link.fullUrl}</p>
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -480,7 +490,7 @@ function UTMRow({ link, onDelete, onShortUrlSaved, onEdit, onDuplicate }: {
                         if (!svg) return;
                         const blob = new Blob([svg.outerHTML], { type: "image/svg+xml" });
                         const a = document.createElement("a");
-                        a.href = URL.createObjectURL(blob); a.download = `qr-${link.name || link.id}.svg`; a.click();
+                        a.href = URL.createObjectURL(blob); a.download = `qr-${link.utmCampaign || link.id}.svg`; a.click();
                         toast.success("QR 다운로드됨");
                       }} className="text-xs text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-lg border border-border hover:bg-secondary transition-colors">
                         SVG 다운로드
@@ -965,7 +975,7 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
                   <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
                     className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-400/20 text-xs text-amber-600">
                     <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                    <span>동일한 조합의 UTM이 이미 있어요. <span className="font-medium">'{duplicate.name || "이름 없음"}'</span> — 그래도 저장할 수 있어요.</span>
+                    <span>동일한 조합의 UTM이 이미 있어요. <span className="font-medium">'{getUtmRowTitle(duplicate)}'</span> — 그래도 저장할 수 있어요.</span>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -1009,18 +1019,18 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
                       {urlStatus === "idle" && <p className="text-xs text-muted-foreground mt-1">광고를 클릭했을 때 열릴 페이지 주소예요</p>}
                     </Field>
 
-                    {/* 광고 채널 */}
-                    <Field label="광고 채널" required hint="어디에서 노출되는 광고인가요?">
+                    {/* 노출 위치 */}
+                    <Field label="어디에서 노출되나요?" required>
                       <Select
                         value={form.source}
                         onChange={set("source")}
                         options={basicSources}
-                        placeholder="채널 선택"
+                        placeholder="노출 위치 선택"
                       />
                     </Field>
 
-                    {/* 광고 유형 */}
-                    <Field label="광고 유형" required hint="어떤 방식의 광고인가요?">
+                    {/* 콘텐츠 형태 */}
+                    <Field label="어떤 형태의 콘텐츠인가요?" required>
                       <Select
                         value={form.medium}
                         onChange={set("medium")}
@@ -1028,12 +1038,12 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
                           value: m.value,
                           label: m.label + ("desc" in m && m.desc ? ` — ${m.desc}` : ""),
                         }))}
-                        placeholder="유형 선택"
+                        placeholder="콘텐츠 형태 선택"
                       />
                     </Field>
 
-                    {/* 캠페인 이름 */}
-                    <Field label="캠페인 이름" required hint="언더바(_)로 단어를 구분해요">
+                    {/* 캠페인 */}
+                    <Field label="어떤 캠페인인가요?" required hint="언더바(_)로 단어를 구분해요">
                       {campaignSuggestions.length > 0 ? (
                         <div className="space-y-2">
                           <Select

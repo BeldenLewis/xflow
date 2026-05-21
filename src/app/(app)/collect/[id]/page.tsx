@@ -173,6 +173,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
 
   const [script, setScript] = useState<string | null>(null);
   const [scriptLoading, setScriptLoading] = useState(false);
+  const [browserOrigin, setBrowserOrigin] = useState("");
   // console sniffer paste
   const [pasteJson, setPasteJson] = useState("");
   const [pasteError, setPasteError] = useState("");
@@ -359,6 +360,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
   }, [id]);
 
   useEffect(() => { fetchSource(); }, [fetchSource]);
+  useEffect(() => { setBrowserOrigin(window.location.origin); }, []);
 
   // 프로젝트 컨텍스트 ↔ URL 의 소스 동기화
   // - 처음 로드: URL 의 소스 projectId 와 currentProject 가 다르면 currentProject 를 맞춤
@@ -1039,6 +1041,18 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
           {/* 스크립트 탭 */}
           {tab === "script" && (
             <div className="space-y-5">
+              {browserOrigin.includes("localhost") && (
+                <div className="p-4 rounded-2xl border border-amber-400/40 bg-amber-500/10 flex items-start gap-3">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-amber-700 dark:text-amber-300">로컬 스크립트 주의</p>
+                    <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                      현재 localhost에서 열고 있어 복사한 스크립트는 localhost API로 전송됩니다.
+                      아임웹 운영 사이트에는 <b>machstudio.vercel.app</b>에서 접속한 뒤 스크립트를 복사해 설치하세요.
+                    </p>
+                  </div>
+                </div>
+              )}
               {/* B: 콘솔 스니퍼 */}
               <div className="p-4 rounded-2xl border border-border">
                 <div className="flex items-center gap-2 mb-3">

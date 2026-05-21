@@ -324,7 +324,11 @@ export function WorkspaceSettingsModal({ open, onClose }: Props) {
   };
 
   const handleSaveTemplate = async () => {
-    if (!tForm.name || !tForm.source || !tForm.medium || !workspace?.id) return;
+    if (!workspace?.id) return;
+    if (!tForm.name.trim() || !tForm.source.trim() || !tForm.medium.trim() || !tForm.campaign.trim()) {
+      toast.error("템플릿 이름, source, medium, campaign을 모두 입력해주세요");
+      return;
+    }
     setIsSavingTemplate(true);
     try {
       const res = await fetch("/api/utm-templates", {
@@ -332,7 +336,8 @@ export function WorkspaceSettingsModal({ open, onClose }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workspaceId: workspace.id, ...tForm }),
       });
-      if (!res.ok) { toast.error("템플릿을 저장하지 못했어요. 다시 시도해주세요"); return; }
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "템플릿을 저장하지 못했어요. 다시 시도해주세요"); return; }
       setTForm({ name: "", source: "", medium: "", campaign: "", term: "", content: "" });
       setShowNewTemplate(false);
       fetchTemplates();
@@ -685,7 +690,7 @@ export function WorkspaceSettingsModal({ open, onClose }: Props) {
                                     onChange={(e) => setTForm((f) => ({ ...f, medium: e.target.value }))} className={inputCls} />
                                 </div>
                                 <div>
-                                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">utm_campaign (선택)</label>
+                                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">utm_campaign *</label>
                                   <input type="text" list="utm-template-campaign-presets" placeholder="예: 2025_브랜드" value={tForm.campaign}
                                     onChange={(e) => setTForm((f) => ({ ...f, campaign: e.target.value }))} className={inputCls} />
                                 </div>
@@ -711,7 +716,7 @@ export function WorkspaceSettingsModal({ open, onClose }: Props) {
                                 <button onClick={() => { setShowNewTemplate(false); setTForm({ name: "", source: "", medium: "", campaign: "", term: "", content: "" }); }}
                                   className="px-4 py-2 rounded-xl border border-border text-sm hover:bg-secondary transition-colors">취소</button>
                                 <motion.button whileTap={{ scale: 0.95 }} onClick={handleSaveTemplate}
-                                  disabled={!tForm.name || !tForm.source || !tForm.medium || isSavingTemplate}
+                                  disabled={!tForm.name.trim() || !tForm.source.trim() || !tForm.medium.trim() || !tForm.campaign.trim() || isSavingTemplate}
                                   className="px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40">
                                   {isSavingTemplate ? "저장 중..." : "저장"}
                                 </motion.button>

@@ -24,6 +24,7 @@ function presets(): DateRange[] {
     { from: new Date(today.getTime() - 7 * 86400_000), to: endOfToday, label: "최근 7일" },
     { from: new Date(today.getTime() - 30 * 86400_000), to: endOfToday, label: "최근 30일" },
     { from: new Date(today.getTime() - 90 * 86400_000), to: endOfToday, label: "최근 90일" },
+    { from: new Date(today.getTime() - 365 * 86400_000), to: endOfToday, label: "최근 365일" },
   ];
 }
 

@@ -31,7 +31,14 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
   const { workspaceId, name, source, medium, campaign, term, content } = await request.json();
-  if (!name || !source || !medium) return NextResponse.json({ error: "name, source, medium은 필수입니다" }, { status: 400 });
+  const nameValue = typeof name === "string" ? name.trim() : "";
+  const sourceValue = typeof source === "string" ? source.trim().toLowerCase() : "";
+  const mediumValue = typeof medium === "string" ? medium.trim().toLowerCase() : "";
+  const campaignValue = typeof campaign === "string" ? campaign.trim() : "";
+
+  if (!nameValue || !sourceValue || !mediumValue || !campaignValue) {
+    return NextResponse.json({ error: "name, source, medium, campaign은 필수입니다" }, { status: 400 });
+  }
 
   const wsId = await getWorkspaceId(workspaceId, user.id);
   if (!wsId) return NextResponse.json({ error: "워크스페이스 없음" }, { status: 400 });
@@ -40,10 +47,10 @@ export async function POST(request: Request) {
     data: {
       id: crypto.randomUUID(),
       workspaceId: wsId,
-      name,
-      source: source.trim().toLowerCase(),
-      medium: medium.trim().toLowerCase(),
-      campaign: campaign?.trim() || null,
+      name: nameValue,
+      source: sourceValue,
+      medium: mediumValue,
+      campaign: campaignValue,
       term: term?.trim() || null,
       content: content?.trim() || null,
     },

@@ -23,6 +23,13 @@ const KST_OFFSET = 9 * 60 * 60_000;
 const DAY_MS = 86_400_000;
 
 type TimedRecord = { createdAt: Date; data: Prisma.JsonValue };
+type CompositionRecord = { sourceId: string; data: Prisma.JsonValue };
+type FieldAlias = {
+  key: string;
+  label: string;
+  normalizedKey: string;
+  normalizedLabel: string;
+};
 
 const VISITOR_DIMENSIONS = [
   {
@@ -267,17 +274,42 @@ function splitValues(value: unknown): string[] {
     .filter(Boolean);
 }
 
-function pickValue(data: Prisma.JsonValue, candidates: readonly string[]) {
+function buildFieldAliasLookup(sources: Array<{ id: string; fieldMappings: Array<{ key: string; label: string }> }>) {
+  return new Map(
+    sources.map((source) => [
+      source.id,
+      source.fieldMappings.map((field) => ({
+        key: field.key,
+        label: field.label,
+        normalizedKey: normalizeKey(field.key),
+        normalizedLabel: normalizeKey(field.label),
+      })),
+    ]),
+  );
+}
+
+function matchesCandidate(value: string, candidate: string) {
+  return value === candidate || value.includes(candidate) || candidate.includes(value);
+}
+
+function pickValue(data: Prisma.JsonValue, candidates: readonly string[], fieldAliases: FieldAlias[] = []) {
   if (!data || typeof data !== "object" || Array.isArray(data)) return [];
   const record = data as Record<string, unknown>;
   const normalizedCandidates = candidates.map(normalizeKey).filter((candidate) => candidate.length > 1);
-  const entries = Object.entries(record).map(([key, value]) => ({ key, value, normalizedKey: normalizeKey(key) }));
+  const entries = Object.entries(record).map(([key, value]) => {
+    const alias = fieldAliases.find((field) => field.key === key);
+    return {
+      key,
+      value,
+      normalizedKey: normalizeKey(key),
+      normalizedLabel: alias?.normalizedLabel ?? "",
+    };
+  });
 
   for (const candidate of normalizedCandidates) {
-    const matched = entries.find(({ normalizedKey }) => (
-      normalizedKey === candidate ||
-      normalizedKey.includes(candidate) ||
-      candidate.includes(normalizedKey)
+    const matched = entries.find(({ normalizedKey, normalizedLabel }) => (
+      matchesCandidate(normalizedKey, candidate) ||
+      (normalizedLabel ? matchesCandidate(normalizedLabel, candidate) : false)
     ));
     if (matched) return splitValues(matched.value);
   }
@@ -392,7 +424,7 @@ export async function POST(request: Request) {
   const baseParams = { workspaceId, projectId, filters };
   const rangeWhere = buildWhere({ ...baseParams, from, to });
 
-  const [yesterdayCount, todayCount, cumulativeCount, rangeCount, previousRangeCount, cumulativeBeforeRange, rangeRecords, heatmapRecords, utmGroups] = await Promise.all([
+  const [yesterdayCount, todayCount, cumulativeCount, rangeCount, previousRangeCount, cumulativeBeforeRange, rangeRecords, heatmapRecords, utmGroups, sourceFields] = await Promise.all([
     prisma.collectRecord.count({ where: buildWhere({ ...baseParams, from: yesterdayStart, lt: todayStart }) }),
     prisma.collectRecord.count({ where: buildWhere({ ...baseParams, from: todayStart, to: now }) }),
     prisma.collectRecord.count({ where: buildWhere(baseParams) }),
@@ -401,7 +433,7 @@ export async function POST(request: Request) {
     prisma.collectRecord.count({ where: buildWhere({ ...baseParams, lt: from }) }),
     prisma.collectRecord.findMany({
       where: rangeWhere,
-      select: { data: true },
+      select: { sourceId: true, data: true },
       orderBy: { createdAt: "desc" },
       take: 5000,
     }),
@@ -420,12 +452,25 @@ export async function POST(request: Request) {
       where: rangeWhere,
       _count: { _all: true },
     }),
+    prisma.collectSource.findMany({
+      where: {
+        workspaceId,
+        projectId,
+        ...(filters?.sourceId && filters.sourceId !== "all" ? { id: filters.sourceId } : {}),
+      },
+      select: {
+        id: true,
+        fieldMappings: { select: { key: true, label: true } },
+      },
+    }),
   ]);
 
+  const fieldAliasesBySource = buildFieldAliasLookup(sourceFields);
   const composition = VISITOR_DIMENSIONS.map((dimension) => {
     const counts = new Map<string, number>();
-    for (const record of rangeRecords) {
-      for (const value of pickValue(record.data, dimension.candidates)) {
+    for (const record of rangeRecords as CompositionRecord[]) {
+      const fieldAliases = fieldAliasesBySource.get(record.sourceId) ?? [];
+      for (const value of pickValue(record.data, dimension.candidates, fieldAliases)) {
         counts.set(value, (counts.get(value) ?? 0) + 1);
       }
     }

@@ -47,7 +47,7 @@ export default function ProjectMembersModal({ projectId, projectName, workspaceI
     }
   }, [projectId, workspaceId]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { void Promise.resolve().then(fetchData); }, [fetchData]);
 
   const handleAdd = async () => {
     if (!addForm.userId) { toast.error("사용자를 선택해주세요"); return; }
@@ -98,7 +98,7 @@ export default function ProjectMembersModal({ projectId, projectName, workspaceI
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
           <p className="text-xs text-muted-foreground">
             프로젝트 단위 권한입니다. 워크스페이스 권한 위에 좁은 권한을 덮어쓸 수 있어요.
-            <br /><b>VIEWER</b>: 읽기만 / <b>EDITOR</b>: 데이터·위젯 편집 / <b>ADMIN</b>: 권한 관리까지.
+            <br /><b>VIEWER</b>: 읽기만 / <b>EDITOR</b>: 데이터·보고서 편집 / <b>ADMIN</b>: 권한 관리까지.
           </p>
 
           {loading ? (

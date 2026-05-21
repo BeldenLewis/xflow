@@ -10,7 +10,7 @@ import { prisma } from "@/lib/prisma";
 //
 // 주의: 아임웹은 사용자 정의 코드를 페이지에 직접 인라인하므로 보통 HTML 에 나타남.
 //      외부 .js 파일로 빼서 src 로 로드한 경우엔 탐지 불가 → '판단 불가' 응답.
-export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -51,7 +51,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 8000);
     const res = await fetch(source.siteUrl, {
-      headers: { "User-Agent": "xflow-installation-checker/1.0" },
+      headers: { "User-Agent": "mach-installation-checker/1.0" },
       signal: ctrl.signal,
       redirect: "follow",
     });
@@ -62,8 +62,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
     if (res.ok) {
       const html = await res.text();
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
-      const collectUrl = baseUrl ? `${baseUrl}/api/collect` : "/api/collect";
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
+      const collectUrl = `${baseUrl.replace(/\/+$/, "")}/api/collect`;
 
       result.apiKeyDetected = html.includes(source.apiKey);
       result.collectUrlDetected = html.includes(collectUrl) || /\/api\/collect/.test(html);

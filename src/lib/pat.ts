@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 
-// xflow Personal Access Token 포맷: xfp_<32바이트 base64url>
+// mach Personal Access Token 포맷: xfp_<32바이트 base64url>
+// 기존 토큰 prefix 호환을 위해 xfp_ 는 유지합니다.
 // 평문 토큰은 발급 직후 한 번만 표시되고, DB 에는 SHA-256 해시만 저장.
 
 export function generateToken(): { token: string; tokenHash: string; prefix: string } {

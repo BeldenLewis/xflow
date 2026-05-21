@@ -36,6 +36,10 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local Supabase / seed scratch files
+supabase/.temp/
+scripts/seed-test-reg.mjs
+
 # claude code
 .claude
 

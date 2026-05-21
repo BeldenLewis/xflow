@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -19,7 +19,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   });
   if (!membership) return NextResponse.json({ error: "접근 권한 없음" }, { status: 403 });
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://xflow-app.vercel.app";
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? new URL(req.url).origin;
   const collectUrl = `${baseUrl}/api/collect`;
 
   const fieldMap = source.fieldMappings
@@ -37,8 +37,10 @@ ${fieldMap}
   ];
 
   // ── UTM 어트리뷰션 (first-touch + last-touch, 다중 저장소 폴백, referrer 추론) ──
-  var UTM_LAST_KEY  = "xflow_utm";        // 최근 유입 (덮어씀)
-  var UTM_FIRST_KEY = "xflow_utm_first";  // 최초 유입 (한번 설정되면 유지)
+  var UTM_LAST_KEY  = "mach_utm";        // 최근 유입 (덮어씀)
+  var UTM_FIRST_KEY = "mach_utm_first";  // 최초 유입 (한번 설정되면 유지)
+  var LEGACY_UTM_LAST_KEY  = "x" + "flow_utm";
+  var LEGACY_UTM_FIRST_KEY = "x" + "flow_utm_first";
   var UTM_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30일
 
   var REFERRER_MAP = {
@@ -100,6 +102,17 @@ ${fieldMap}
     } catch(e) {}
   }
 
+  function migrateLegacyUtm() {
+    if (!storageGet(UTM_LAST_KEY)) {
+      var legacyLast = storageGet(LEGACY_UTM_LAST_KEY);
+      if (legacyLast) storageSet(UTM_LAST_KEY, legacyLast, UTM_TTL_MS);
+    }
+    if (!storageGet(UTM_FIRST_KEY)) {
+      var legacyFirst = storageGet(LEGACY_UTM_FIRST_KEY);
+      if (legacyFirst) storageSet(UTM_FIRST_KEY, legacyFirst, UTM_TTL_MS);
+    }
+  }
+
   function readUrlUtm() {
     var params = new URLSearchParams(window.location.search);
     if (!params.get("utm_source")) return null;
@@ -158,6 +171,7 @@ ${fieldMap}
       }
     }
   }
+  migrateLegacyUtm();
   captureUtm();
 
   function getUtmContext() {

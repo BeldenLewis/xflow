@@ -1,4 +1,4 @@
--- xflow 초기 스키마
+-- mach 초기 스키마
 
 CREATE TYPE "Role" AS ENUM ('OWNER', 'ADMIN', 'MEMBER');
 

@@ -98,7 +98,7 @@ export default function ApiTokensModal({ workspaceId, onClose }: Props) {
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           <p className="text-xs text-muted-foreground">
-            외부 도구(Zapier, n8n, Postman 등)에서 xflow API 를 호출할 때 사용합니다. 토큰은 발급 직후 한 번만 표시되니 안전한 곳에 저장하세요.
+            외부 도구(Zapier, n8n, Postman 등)에서 mach API 를 호출할 때 사용합니다. 토큰은 발급 직후 한 번만 표시되니 안전한 곳에 저장하세요.
           </p>
 
           {newToken && (

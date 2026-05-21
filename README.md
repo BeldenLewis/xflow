@@ -2,10 +2,21 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-Create `.env.local` and add the public base URL used by the UTM builder's built-in short links:
+Create `.env.local` with the required Supabase/Postgres values and the app URL used for generated links:
 
 ```bash
-# Optional, defaults to the current app origin.
+# Public Supabase client values. These are browser-visible by design.
+NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<publishable-or-anon-key>
+
+# Server-only values.
+DATABASE_URL=postgresql://...
+SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
+
+# App base URL. Local dev should stay localhost; production is set in Vercel.
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+# Optional, defaults to the current request origin.
 SHORT_URL_BASE=https://go.example.com
 ```
 

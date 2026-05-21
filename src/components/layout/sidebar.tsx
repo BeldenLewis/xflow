@@ -137,7 +137,6 @@ export function Sidebar() {
   return (
     <>
     <aside className="flex flex-col w-60 bg-background rounded-2xl shadow-md fixed left-2 top-2 bottom-2 z-30">
-
       {/* 워크스페이스 switcher */}
       <div className="px-3 pt-4 pb-2">
         <div className="relative">

@@ -28,7 +28,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   });
 
   const backup = {
-    _schema: "xflow.collect-source.backup.v1",
+    _schema: "mach.collect-source.backup.v1",
     exportedAt: new Date().toISOString(),
     source: {
       name: source.name,
@@ -56,7 +56,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     })),
   };
 
-  const filename = `xflow-backup-${source.name.replace(/[^a-zA-Z0-9가-힣_-]+/g, "_")}-${kstDateString()}.json`;
+  const filename = `mach-backup-${source.name.replace(/[^a-zA-Z0-9가-힣_-]+/g, "_")}-${kstDateString()}.json`;
   return new NextResponse(JSON.stringify(backup, null, 2), {
     headers: {
       "Content-Type": "application/json; charset=utf-8",

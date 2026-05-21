@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "xflow",
-    short_name: "xflow",
+    name: "mach",
+    short_name: "mach",
     description: "마케팅 어트리뷰션·수집·대시보드 플랫폼",
     start_url: "/dashboard",
     display: "standalone",

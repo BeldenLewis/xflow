@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "xflow",
+  title: "mach",
   description: "디지털 마케팅팀 협업 플랫폼",
 };
 

@@ -131,7 +131,7 @@ export default function LivePage({ params }: { params: Promise<{ slug: string }>
   useEffect(() => {
     const sendHeight = () => {
       if (window.parent !== window) {
-        window.parent.postMessage({ type: "xflow-resize", height: document.body.scrollHeight }, "*");
+        window.parent.postMessage({ type: "mach-resize", height: document.body.scrollHeight }, "*");
       }
     };
     sendHeight();

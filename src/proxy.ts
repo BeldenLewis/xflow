@@ -2,6 +2,25 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function proxy(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+
+  // OAuth 콜백과 공개/토큰 기반 엔드포인트는 세션 확인 전 통과.
+  // 공개 경로에서 Supabase Auth 호출을 먼저 하면 헬스체크와 수집 스크립트도 인증 상태에 영향받을 수 있다.
+  if (
+    pathname.startsWith("/auth/callback") ||
+    pathname.startsWith("/api/collect") ||
+    pathname.startsWith("/api/webinar/") ||
+    pathname.match(/^\/webinar\/[^/]+\/live/) ||
+    pathname.startsWith("/api/public") ||
+    pathname.startsWith("/api/shorten-url") ||
+    pathname.startsWith("/api/health") ||
+    pathname.startsWith("/share") ||
+    pathname.startsWith("/r/") ||
+    pathname.startsWith("/api/cron")
+  ) {
+    return NextResponse.next();
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -27,43 +46,8 @@ export async function proxy(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
 
-  // OAuth 콜백은 세션 교환 전이므로 미들웨어 통과
-  if (request.nextUrl.pathname.startsWith("/auth/callback")) {
-    return NextResponse.next();
-  }
-
-  // /api/collect는 API key 인증을 사용하므로 미들웨어 통과
-  if (request.nextUrl.pathname.startsWith("/api/collect")) {
-    return NextResponse.next();
-  }
-
-  // /api/webinar/[slug]/* 는 공개 웨비나 API (인증 불필요)
-  if (request.nextUrl.pathname.startsWith("/api/webinar/")) {
-    return NextResponse.next();
-  }
-
-  // /webinar/[slug]/live 는 공개 라이브 페이지
-  if (request.nextUrl.pathname.match(/^\/webinar\/[^/]+\/live/)) {
-    return NextResponse.next();
-  }
-
-  // /api/public 과 /share 는 토큰 기반 공개 — 미들웨어 통과
-  if (
-    request.nextUrl.pathname.startsWith("/api/public") ||
-    request.nextUrl.pathname.startsWith("/api/shorten-url") ||
-    request.nextUrl.pathname.startsWith("/share") ||
-    request.nextUrl.pathname.startsWith("/r/")
-  ) {
-    return NextResponse.next();
-  }
-
-  // 크론 워커 (인증된 호출 — secret 헤더로 보호되어야 함)
-  if (request.nextUrl.pathname.startsWith("/api/cron")) {
-    return NextResponse.next();
-  }
-
   const publicPages = ["/", "/signup", "/reset-password"];
-  const isPublicPage = publicPages.includes(request.nextUrl.pathname);
+  const isPublicPage = publicPages.includes(pathname);
 
   // 비로그인 상태에서 보호된 페이지 접근 → 로그인으로
   if (!user && !isPublicPage) {
@@ -71,7 +55,7 @@ export async function proxy(request: NextRequest) {
   }
 
   // 로그인 상태에서 로그인/회원가입 페이지 접근 → 대시보드로
-  if (user && (request.nextUrl.pathname === "/" || request.nextUrl.pathname === "/signup")) {
+  if (user && (pathname === "/" || pathname === "/signup")) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 

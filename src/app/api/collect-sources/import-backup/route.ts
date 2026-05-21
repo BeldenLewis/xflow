@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity";
 
-// xflow-backup-*.json 파일 복구 → 새 소스로 생성하고 모든 레코드 import.
+// mach 백업 JSON 파일 복구 → 새 소스로 생성하고 모든 레코드 import.
 // body: { workspaceId, projectId, backup: {...} }
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -23,7 +23,9 @@ export async function POST(request: Request) {
   if (!workspaceId || !projectId || !backup) {
     return NextResponse.json({ error: "workspaceId, projectId, backup 필요" }, { status: 400 });
   }
-  if (backup._schema !== "xflow.collect-source.backup.v1") {
+  const legacySchema = ["x" + "flow", "collect-source", "backup", "v1"].join(".");
+  const supportedSchemas = ["mach.collect-source.backup.v1", legacySchema];
+  if (!backup._schema || !supportedSchemas.includes(backup._schema)) {
     return NextResponse.json({ error: "지원하지 않는 백업 포맷이에요" }, { status: 400 });
   }
 

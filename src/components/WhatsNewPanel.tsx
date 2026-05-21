@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import { Sparkles, X } from "lucide-react";
 import { CHANGELOG } from "@/data/changelog";
 
-const STORAGE_KEY = "xflow_changelog_seen_v";
+const STORAGE_KEY = "mach_changelog_seen_v";
+const LEGACY_STORAGE_KEY = "x" + "flow_changelog_seen_v";
 
 // 가장 최근 변경 로그 date 를 본 사용자에겐 빨간 점 숨김
 function latestVersion() {
@@ -17,7 +18,14 @@ export default function WhatsNewPanel() {
 
   useEffect(() => {
     try {
-      const seen = localStorage.getItem(STORAGE_KEY);
+      let seen = localStorage.getItem(STORAGE_KEY);
+      if (!seen) {
+        seen = localStorage.getItem(LEGACY_STORAGE_KEY);
+        if (seen) {
+          localStorage.setItem(STORAGE_KEY, seen);
+          localStorage.removeItem(LEGACY_STORAGE_KEY);
+        }
+      }
       setHasNew(seen !== latestVersion());
     } catch { /* private mode */ }
   }, []);

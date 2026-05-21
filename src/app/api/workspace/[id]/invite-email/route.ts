@@ -65,8 +65,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     },
   });
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
-  const signupLink = `${baseUrl}/signup?invite=${token}`;
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
+  const signupLink = new URL(`/signup?invite=${token}`, baseUrl).toString();
 
   return NextResponse.json({
     invitation,

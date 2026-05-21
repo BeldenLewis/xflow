@@ -33,7 +33,8 @@ const BASIC_MEDIUMS = [
   { label: "추천링크",   value: "referral", desc: "다른 사이트 링크" },
 ];
 
-const DRAFT_KEY = "xflow-utm-draft";
+const DRAFT_KEY = "mach-utm-draft";
+const LEGACY_DRAFT_KEY = "x" + "flow-utm-draft";
 type BuilderMode = "basic" | "advanced";
 type CampaignEntryMode = "select" | "custom";
 
@@ -98,6 +99,23 @@ function readDraft(raw: string | null): DraftState | null {
   } catch {
     return null;
   }
+}
+
+function getDraftPayload() {
+  const current = localStorage.getItem(DRAFT_KEY);
+  if (current) return current;
+
+  const legacy = localStorage.getItem(LEGACY_DRAFT_KEY);
+  if (legacy) {
+    localStorage.setItem(DRAFT_KEY, legacy);
+    localStorage.removeItem(LEGACY_DRAFT_KEY);
+  }
+  return legacy;
+}
+
+function clearDraftPayload() {
+  localStorage.removeItem(DRAFT_KEY);
+  localStorage.removeItem(LEGACY_DRAFT_KEY);
 }
 
 function getDateGroup(dateStr: string): string {
@@ -533,8 +551,12 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
 
   const persistDraft = useCallback(() => {
     const draft = getDraft();
-    if (hasDraftValue(draft)) localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
-    else localStorage.removeItem(DRAFT_KEY);
+    if (hasDraftValue(draft)) {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+      localStorage.removeItem(LEGACY_DRAFT_KEY);
+    } else {
+      clearDraftPayload();
+    }
   }, [getDraft]);
 
   const seedAdvancedFromBasic = useCallback(() => {
@@ -577,7 +599,7 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
       return;
     }
     // 신규: 드래프트 복원
-    const draft = readDraft(localStorage.getItem(DRAFT_KEY));
+    const draft = readDraft(getDraftPayload());
     if (draft) {
       setMode(draft.mode);
       setForm(draft.form);
@@ -673,7 +695,7 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
     setCampaignEntryMode("select");
     setUrlStatus("idle"); setShowDraftBanner(false);
     setAdvUrls([]); setAdvSources([]); setAdvMediums([]);
-    localStorage.removeItem(DRAFT_KEY);
+    clearDraftPayload();
   };
 
   const handleAdvancedSave = async () => {
@@ -768,7 +790,7 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
         });
         toast.success("UTM이 저장됐어요", { id });
       }
-      localStorage.removeItem(DRAFT_KEY);
+      clearDraftPayload();
       reset();
       onSaved();
       onClose();

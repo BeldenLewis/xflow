@@ -549,7 +549,7 @@ export function WorkspaceSettingsModal({ open, onClose }: Props) {
                                 <Plus className="w-3.5 h-3.5" />{isInviting ? "추가 중..." : "추가"}
                               </motion.button>
                             </div>
-                            <p className="text-xs text-muted-foreground">이미 xflow에 가입된 계정만 추가할 수 있어요</p>
+                            <p className="text-xs text-muted-foreground">이미 mach에 가입된 계정만 추가할 수 있어요</p>
                           </div>
                         )}
                       </div>

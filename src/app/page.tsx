@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { getAuthCallbackUrl } from "@/lib/app-url";
 import { toast } from "sonner";
 import { SignInPage } from "@/components/sign-in";
 
@@ -51,7 +52,7 @@ export default function LoginPage() {
   const handleGoogleSignIn = async () => {
     await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: { redirectTo: getAuthCallbackUrl() },
     });
   };
 

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { SignUpPage } from "@/components/ui/sign-up";
 import { createClient } from "@/lib/supabase/client";
+import { getAuthCallbackUrl } from "@/lib/app-url";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -33,7 +34,7 @@ export default function SignupPage() {
       password,
       options: {
         data: { name },
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: getAuthCallbackUrl(),
       },
     });
 
@@ -49,7 +50,7 @@ export default function SignupPage() {
   const handleGoogleSignUp = async () => {
     await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: { redirectTo: getAuthCallbackUrl() },
     });
   };
 

@@ -17,82 +17,64 @@ import {
 import { toast } from "sonner";
 import {
   Area,
-  AreaChart,
+  ComposedChart,
   CartesianGrid,
+  Legend,
+  Line,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 import { useWorkspace } from "@/contexts/workspace";
+import {
+  type AdColumnKey,
+  AD_COLUMN_FIELDS,
+  type ColumnMapping,
+  type NormalizedAdRow,
+  type ParsedPreview,
+  type SheetAnalysis,
+  type SourceChoice,
+  type SourceType,
+  analyzeSheetRows,
+  parseMappedRows,
+  summarizeRows,
+} from "@/lib/ad-parse";
 
-type SourceType = "GOOGLE" | "META" | "MANUAL";
-type SourceChoice = "AUTO" | SourceType;
+function workbookToRows(workbook: XLSX.WorkBook) {
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false }) as unknown[][];
+}
+
+async function readSheetRows(file: File) {
+  const buffer = await file.arrayBuffer();
+  const isCsv = /\.csv$/i.test(file.name) || file.type.includes("csv");
+  if (isCsv) {
+    const bytes = new Uint8Array(buffer);
+    let text: string;
+    if (bytes[0] === 0xff && bytes[1] === 0xfe) {
+      text = new TextDecoder("utf-16le").decode(buffer.slice(2));
+    } else if (bytes[0] === 0xfe && bytes[1] === 0xff) {
+      text = new TextDecoder("utf-16be").decode(buffer.slice(2));
+    } else {
+      text = new TextDecoder("utf-8").decode(buffer).replace(/^﻿/, "");
+    }
+    const workbook = XLSX.read(text, { type: "string", raw: false, cellDates: false });
+    return workbookToRows(workbook);
+  }
+  const workbook = XLSX.read(buffer, { type: "array", raw: false, cellDates: false });
+  return workbookToRows(workbook);
+}
+
+function readCsvRows(csvText: string) {
+  const workbook = XLSX.read(csvText.replace(/^﻿/, ""), { type: "string", raw: false, cellDates: false });
+  return workbookToRows(workbook);
+}
+
 type SourceAddMode = "file" | "googleSheet";
 type ChartMetric = "cost" | "cpm" | "cpc" | "ctr" | "cvr" | "conversions" | "costPerConversion";
 type DetailGroupBy = "campaign" | "adGroup";
 type DetailDateGranularity = "day" | "week" | "month";
-
-interface NormalizedAdRow {
-  sourceType?: SourceType;
-  campaignName: string;
-  adGroupName?: string | null;
-  reportDate?: string | null;
-  reportStart?: string | null;
-  reportEnd?: string | null;
-  status?: string | null;
-  currency?: string | null;
-  cost?: number | null;
-  impressions?: number | null;
-  reach?: number | null;
-  clicks?: number | null;
-  cpm?: number | null;
-  cpc?: number | null;
-  ctr?: number | null;
-  conversions?: number | null;
-  costPerConversion?: number | null;
-  conversionRate?: number | null;
-  resultType?: string | null;
-  raw: Record<string, string>;
-}
-
-interface ParsedPreview {
-  sourceType: SourceType;
-  rows: NormalizedAdRow[];
-  warnings: string[];
-  reportStart?: string | null;
-  reportEnd?: string | null;
-}
-
-type AdColumnKey =
-  | "campaignName"
-  | "adGroupName"
-  | "reportDate"
-  | "reportStart"
-  | "reportEnd"
-  | "cost"
-  | "impressions"
-  | "reach"
-  | "clicks"
-  | "cpm"
-  | "cpc"
-  | "ctr"
-  | "conversions"
-  | "costPerConversion"
-  | "conversionRate"
-  | "status"
-  | "currency"
-  | "resultType";
-
-type ColumnMapping = Partial<Record<AdColumnKey, number>>;
-
-interface SheetAnalysis {
-  rows: unknown[][];
-  headerIndex: number;
-  headers: string[];
-  sourceType: SourceType;
-  mapping: ColumnMapping;
-}
 
 interface MetricSummary {
   sourceType: string;
@@ -159,6 +141,10 @@ interface PerformanceResponse {
     clicks: number;
     conversions: number;
   }>;
+  dailyTrendBySource?: Array<{
+    date: string;
+    sources: Record<string, { cost: number; impressions: number; clicks: number; conversions: number }>;
+  }>;
   detailRows: DetailRow[];
   detailPeriodOptions: Array<{
     value: string;
@@ -191,13 +177,22 @@ const SOURCE_LABELS: Record<string, string> = {
   ALL: "전체 매체",
   GOOGLE: "Google Ads",
   META: "Meta Ads",
-  MANUAL: "직접 업로드",
+  LINKEDIN: "LinkedIn Ads",
+  MANUAL: "직접 입력",
+};
+
+const SOURCE_COLORS: Record<string, string> = {
+  GOOGLE: "#f59e0b",
+  META: "#ec4899",
+  LINKEDIN: "#0a66c2",
+  MANUAL: "#6b7280",
 };
 
 const MEDIA_FILTERS = [
   { value: "ALL", label: "전체" },
   { value: "GOOGLE", label: "Google" },
   { value: "META", label: "Meta" },
+  { value: "LINKEDIN", label: "LinkedIn" },
 ];
 
 const CHART_METRICS: Array<{ value: ChartMetric; label: string }> = [
@@ -222,48 +217,6 @@ const DETAIL_DATE_OPTIONS: Array<{ value: DetailDateGranularity; label: string; 
   { value: "week", label: "주", header: "주 시작" },
   { value: "month", label: "월", header: "월" },
 ];
-
-const AD_COLUMN_FIELDS: Array<{ key: AdColumnKey; label: string; required?: boolean; hint?: string }> = [
-  { key: "campaignName", label: "광고 캠페인", required: true, hint: "캠페인명" },
-  { key: "adGroupName", label: "광고세트/그룹", hint: "Meta 광고세트, Google 광고그룹" },
-  { key: "reportDate", label: "일자", hint: "일자별 리포트용" },
-  { key: "reportStart", label: "보고 시작일" },
-  { key: "reportEnd", label: "보고 종료일" },
-  { key: "cost", label: "지출/비용", hint: "광고비" },
-  { key: "impressions", label: "노출" },
-  { key: "reach", label: "도달" },
-  { key: "clicks", label: "클릭" },
-  { key: "conversions", label: "결과/전환" },
-  { key: "cpm", label: "CPM" },
-  { key: "cpc", label: "CPC" },
-  { key: "ctr", label: "CTR" },
-  { key: "costPerConversion", label: "결과당 비용" },
-  { key: "conversionRate", label: "전환율" },
-  { key: "status", label: "상태" },
-  { key: "currency", label: "통화" },
-  { key: "resultType", label: "결과 유형" },
-];
-
-const FIELD_ALIASES: Record<AdColumnKey, string[]> = {
-  campaignName: ["캠페인", "캠페인 이름", "캠페인명", "Campaign", "Campaign name", "Campaign Name"],
-  adGroupName: ["광고그룹", "광고 그룹", "광고그룹 이름", "광고 세트 이름", "광고 세트", "광고세트", "Ad group", "Ad group name", "Ad set", "Ad set name"],
-  reportDate: ["일", "날짜", "일자", "기간", "Date", "Day", "Date range"],
-  reportStart: ["보고 시작", "보고 시작일", "시작일", "Start date", "Reporting starts", "Report start"],
-  reportEnd: ["보고 종료", "보고 종료일", "종료일", "End date", "Reporting ends", "Report end"],
-  cost: ["비용", "지출", "지출 금액", "지출 금액 (KRW)", "지출금액(KRW)", "Amount spent", "Cost", "Spend"],
-  impressions: ["노출", "노출수", "Impressions"],
-  reach: ["도달", "도달수", "Reach"],
-  clicks: ["클릭", "클릭수", "링크 클릭", "Clicks", "Link clicks"],
-  cpm: ["평균 CPM", "CPM", "CPM(1,000회 노출당 비용)", "Avg. CPM"],
-  cpc: ["평균 CPC", "CPC", "CPC(링크 클릭당 비용)", "Avg. CPC"],
-  ctr: ["클릭률(CTR)", "CTR", "CTR(링크 클릭률)", "Click-through rate"],
-  conversions: ["전환", "전환수", "결과", "Conversions", "Results"],
-  costPerConversion: ["전환당비용", "전환당 비용", "결과당 비용", "Cost / conv.", "Cost per result"],
-  conversionRate: ["전환율", "링크 클릭당 결과 비율", "Conversion rate"],
-  status: ["캠페인 상태", "광고그룹 상태", "게재 상태", "게재 수준", "Status", "Delivery status"],
-  currency: ["통화 코드", "통화", "Currency", "Currency code"],
-  resultType: ["결과 유형", "Result type"],
-};
 
 const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
@@ -323,237 +276,6 @@ function formatDetailPeriod(value: string | null | undefined, granularity: Detai
   if (granularity === "week") return `${value} 주`;
   return value;
 }
-
-function toText(value: unknown) {
-  return String(value ?? "").trim();
-}
-
-function toDateKey(value: unknown) {
-  const raw = toText(value);
-  if (!raw) return null;
-
-  const ymd = raw.match(/(\d{4})[-/.]\s*(\d{1,2})[-/.]\s*(\d{1,2})/);
-  if (ymd) {
-    return `${ymd[1]}-${String(ymd[2]).padStart(2, "0")}-${String(ymd[3]).padStart(2, "0")}`;
-  }
-
-  const parsed = new Date(raw);
-  if (Number.isNaN(parsed.getTime())) return null;
-  const kst = new Date(parsed.getTime() + 9 * 60 * 60_000);
-  return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, "0")}-${String(kst.getUTCDate()).padStart(2, "0")}`;
-}
-
-function normalizeHeader(value: unknown) {
-  return toText(value).replace(/\s+/g, "").toLowerCase();
-}
-
-function toNumber(value: unknown) {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  const raw = toText(value);
-  if (!raw || raw === "-") return null;
-  const cleaned = raw.replace(/,/g, "").replace(/%/g, "").replace(/[^\d.-]/g, "");
-  if (!cleaned || cleaned === "-" || cleaned === ".") return null;
-  const parsed = Number(cleaned);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function rawObject(header: unknown[], row: unknown[]) {
-  return header.reduce<Record<string, string>>((acc, value, index) => {
-    const key = toText(value) || `column_${index + 1}`;
-    acc[key] = toText(row[index]);
-    return acc;
-  }, {});
-}
-
-function findColumnIndex(headers: string[], field: AdColumnKey) {
-  const normalizedHeaders = headers.map(normalizeHeader);
-  const aliases = FIELD_ALIASES[field].map(normalizeHeader);
-
-  for (const alias of aliases) {
-    const index = normalizedHeaders.findIndex((header) => header === alias);
-    if (index >= 0) return index;
-  }
-
-  if (field === "campaignName" || field === "status") return undefined;
-
-  for (const alias of aliases) {
-    const index = normalizedHeaders.findIndex((header) => header && alias && (header.includes(alias) || alias.includes(header)));
-    if (index >= 0) return index;
-  }
-
-  return undefined;
-}
-
-function buildColumnMapping(headers: string[]) {
-  return AD_COLUMN_FIELDS.reduce<ColumnMapping>((acc, field) => {
-    const index = findColumnIndex(headers, field.key);
-    if (index !== undefined) acc[field.key] = index;
-    return acc;
-  }, {});
-}
-
-function inferSourceFromHeaders(headers: string[]) {
-  const normalized = headers.map(normalizeHeader);
-  const metaScore = [
-    "캠페인이름",
-    "광고세트이름",
-    "보고시작",
-    "보고종료",
-    "지출금액(krw)",
-    "결과유형",
-  ].filter((name) => normalized.includes(name)).length;
-  const googleScore = [
-    "캠페인",
-    "광고그룹",
-    "비용",
-    "클릭수",
-    "통화코드",
-    "전환당비용",
-  ].filter((name) => normalized.includes(name)).length;
-  return metaScore > googleScore ? "META" : "GOOGLE";
-}
-
-function analyzeSheetRows(rows: unknown[][], sourceChoice: SourceChoice): SheetAnalysis {
-  let best: { headerIndex: number; headers: string[]; mapping: ColumnMapping; score: number } | null = null;
-  const candidates = rows.slice(0, Math.min(rows.length, 30));
-
-  for (let headerIndex = 0; headerIndex < candidates.length; headerIndex += 1) {
-    const row = candidates[headerIndex];
-    const headers = row.map(toText);
-    const nonEmpty = headers.filter(Boolean).length;
-    if (nonEmpty < 2) continue;
-
-    const mapping = buildColumnMapping(headers);
-    const metricScore = ["cost", "impressions", "clicks", "conversions", "reach"].filter((key) => mapping[key as AdColumnKey] !== undefined).length;
-    const score =
-      (mapping.campaignName !== undefined ? 8 : 0) +
-      (mapping.adGroupName !== undefined ? 3 : 0) +
-      metricScore * 2 +
-      (mapping.reportDate !== undefined || mapping.reportStart !== undefined || mapping.reportEnd !== undefined ? 2 : 0) +
-      Math.min(nonEmpty, 8) * 0.1;
-
-    if (!best || score > best.score) best = { headerIndex, headers, mapping, score };
-  }
-
-  if (!best || best.score < 4) {
-    const headerIndex = rows.findIndex((row) => row.filter((cell) => toText(cell)).length >= 2);
-    if (headerIndex < 0) throw new Error("파일에서 헤더 행을 찾지 못했어요.");
-    const headers = rows[headerIndex].map(toText);
-    best = { headerIndex, headers, mapping: buildColumnMapping(headers), score: 0 };
-  }
-
-  return {
-    rows,
-    headerIndex: best.headerIndex,
-    headers: best.headers,
-    mapping: best.mapping,
-    sourceType: sourceChoice === "AUTO" ? inferSourceFromHeaders(best.headers) : sourceChoice,
-  };
-}
-
-function cellText(row: unknown[], mapping: ColumnMapping, field: AdColumnKey) {
-  const index = mapping[field];
-  return index === undefined ? "" : toText(row[index]);
-}
-
-function cellNumber(row: unknown[], mapping: ColumnMapping, field: AdColumnKey) {
-  const index = mapping[field];
-  return index === undefined ? null : toNumber(row[index]);
-}
-
-function parseMappedRows(analysis: SheetAnalysis): ParsedPreview {
-  if (analysis.mapping.campaignName === undefined) {
-    throw new Error("광고 캠페인 컬럼을 선택해주세요.");
-  }
-
-  const parsed = analysis.rows.slice(analysis.headerIndex + 1).map((row) => {
-    const campaignName = cellText(row, analysis.mapping, "campaignName");
-    if (!campaignName || campaignName === "전체") return null;
-
-    return {
-      sourceType: analysis.sourceType,
-      campaignName,
-      adGroupName: cellText(row, analysis.mapping, "adGroupName") || null,
-      reportDate: toDateKey(cellText(row, analysis.mapping, "reportDate")),
-      reportStart: toDateKey(cellText(row, analysis.mapping, "reportStart")),
-      reportEnd: toDateKey(cellText(row, analysis.mapping, "reportEnd")),
-      status: cellText(row, analysis.mapping, "status") || null,
-      currency: cellText(row, analysis.mapping, "currency") || "KRW",
-      cost: cellNumber(row, analysis.mapping, "cost"),
-      cpm: cellNumber(row, analysis.mapping, "cpm"),
-      impressions: cellNumber(row, analysis.mapping, "impressions"),
-      reach: cellNumber(row, analysis.mapping, "reach"),
-      clicks: cellNumber(row, analysis.mapping, "clicks"),
-      cpc: cellNumber(row, analysis.mapping, "cpc"),
-      ctr: cellNumber(row, analysis.mapping, "ctr"),
-      conversions: cellNumber(row, analysis.mapping, "conversions"),
-      costPerConversion: cellNumber(row, analysis.mapping, "costPerConversion"),
-      conversionRate: cellNumber(row, analysis.mapping, "conversionRate"),
-      resultType: cellText(row, analysis.mapping, "resultType") || null,
-      raw: rawObject(analysis.headers, row),
-    };
-  }).filter(Boolean) as NormalizedAdRow[];
-
-  const period = inferReportPeriod(parsed);
-  const warnings = [
-    ...(analysis.mapping.adGroupName === undefined
-      ? ["광고세트/광고그룹 컬럼이 매핑되지 않았어요. 캠페인별 성과는 볼 수 있지만 광고세트별 세부 분석은 제한됩니다."]
-      : []),
-    ...(period.reportStart && period.reportEnd
-      ? []
-      : ["파일 안에서 날짜 컬럼을 찾지 못했어요. 이 데이터는 업로드일 기준으로 조회됩니다."]),
-  ];
-
-  return {
-    sourceType: analysis.sourceType,
-    rows: parsed,
-    warnings,
-    ...period,
-  };
-}
-
-function inferReportPeriod(parsedRows: NormalizedAdRow[]) {
-  const dates = parsedRows
-    .flatMap((row) => [row.reportDate, row.reportStart, row.reportEnd])
-    .map(toDateKey)
-    .filter((date): date is string => !!date)
-    .sort((a, b) => a.localeCompare(b));
-
-  return {
-    reportStart: dates[0] ?? null,
-    reportEnd: dates[dates.length - 1] ?? null,
-  };
-}
-
-async function readSheetRows(file: File) {
-  const buffer = await file.arrayBuffer();
-  const isCsv = /\.csv$/i.test(file.name) || file.type.includes("csv");
-  const workbook = isCsv
-    ? XLSX.read(new TextDecoder("utf-8").decode(buffer).replace(/^\uFEFF/, ""), { type: "string", raw: false, cellDates: false })
-    : XLSX.read(buffer, { type: "array", raw: false, cellDates: false });
-  return workbookToRows(workbook);
-}
-
-function readCsvRows(csvText: string) {
-  const workbook = XLSX.read(csvText.replace(/^\uFEFF/, ""), { type: "string", raw: false, cellDates: false });
-  return workbookToRows(workbook);
-}
-
-function workbookToRows(workbook: XLSX.WorkBook) {
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false }) as unknown[][];
-}
-
-function summarizeRows(rows: NormalizedAdRow[]) {
-  return rows.reduce((acc, row) => {
-    acc.cost += row.cost ?? 0;
-    acc.impressions += row.impressions ?? 0;
-    acc.clicks += row.clicks ?? 0;
-    acc.conversions += row.conversions ?? 0;
-    return acc;
-  }, { cost: 0, impressions: 0, clicks: 0, conversions: 0 });
-}
-
 export default function AnalyticsPage() {
   const { workspace, currentProject, isLoading: wsLoading } = useWorkspace();
   const hasLoadedRef = useRef(false);
@@ -683,7 +405,7 @@ export default function AnalyticsPage() {
   const mediaSummaries = useMemo(() => {
     const sourceRows = data?.mediaSummary ?? data?.sourceSummary ?? [];
     const lookup = new Map(sourceRows.map((source) => [source.sourceType, source]));
-    const fixed = (["GOOGLE", "META"] as SourceType[]).map((sourceType) => {
+    const fixed = (["GOOGLE", "META", "LINKEDIN"] as SourceType[]).map((sourceType) => {
       const row = lookup.get(sourceType);
       return {
         sourceType,
@@ -693,15 +415,30 @@ export default function AnalyticsPage() {
         conversions: row?.conversions ?? 0,
       };
     });
-    const extras = sourceRows.filter((row) => !["GOOGLE", "META"].includes(row.sourceType));
+    const extras = sourceRows.filter((row) => !["GOOGLE", "META", "LINKEDIN"].includes(row.sourceType));
     return [...fixed, ...extras];
   }, [data]);
   const chartRows = useMemo(() => {
-    return (data?.dailyTrend ?? []).map((row) => ({
-      ...row,
-      value: getChartMetricValue(row, chartMetric),
-    }));
+    const bySourceMap = new Map(
+      (data?.dailyTrendBySource ?? []).map((r) => [r.date, r.sources])
+    );
+    return (data?.dailyTrend ?? []).map((row) => {
+      const sources = bySourceMap.get(row.date) ?? {};
+      const sourceValues = Object.fromEntries(
+        Object.entries(sources).map(([src, vals]) => [src, getChartMetricValue(vals, chartMetric)])
+      );
+      return { ...row, value: getChartMetricValue(row, chartMetric), ...sourceValues };
+    });
   }, [data, chartMetric]);
+
+  const activeSourceTypes = useMemo(() => {
+    if (sourceFilter !== "ALL") return [];
+    const set = new Set<string>();
+    (data?.dailyTrendBySource ?? []).forEach((row) =>
+      Object.keys(row.sources).forEach((src) => set.add(src))
+    );
+    return Array.from(set);
+  }, [data, sourceFilter]);
   const chartMetricLabel = CHART_METRICS.find((metric) => metric.value === chartMetric)?.label ?? "지출";
   const detailRows = data?.detailRows ?? data?.recentRows ?? [];
   const detailPagination = data?.detailPagination ?? {
@@ -752,7 +489,7 @@ export default function AnalyticsPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="grid h-10 grid-cols-3 rounded-xl border border-border bg-secondary/30 p-1">
+          <div className="grid h-10 grid-cols-4 rounded-xl border border-border bg-secondary/30 p-1">
             {MEDIA_FILTERS.map((filter) => (
               <motion.button
                 key={filter.value}
@@ -1045,12 +782,12 @@ export default function AnalyticsPage() {
                   ))}
                 </div>
               </div>
-              <div className="h-64">
+              <div className={activeSourceTypes.length > 0 ? "h-72" : "h-64"}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartRows}>
+                  <ComposedChart data={chartRows}>
                     <defs>
                       <linearGradient id="adSpendFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.28} />
+                        <stop offset="5%" stopColor="#8b5cf6" stopOpacity={activeSourceTypes.length > 0 ? 0.1 : 0.28} />
                         <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0.02} />
                       </linearGradient>
                     </defs>
@@ -1061,9 +798,41 @@ export default function AnalyticsPage() {
                       tickFormatter={(value) => formatMetricValue(chartMetric, Number(value))}
                       width={82}
                     />
-                    <Tooltip formatter={(value) => formatMetricValue(chartMetric, Number(value ?? 0))} />
-                    <Area type="monotone" dataKey="value" stroke="#8b5cf6" fill="url(#adSpendFill)" strokeWidth={2} />
-                  </AreaChart>
+                    <Tooltip
+                      formatter={(value, name) => [
+                        formatMetricValue(chartMetric, Number(value ?? 0)),
+                        name === "value" ? "전체" : (SOURCE_LABELS[String(name)] ?? String(name)),
+                      ]}
+                    />
+                    {activeSourceTypes.length > 0 && (
+                      <Legend
+                        formatter={(value) => SOURCE_LABELS[value] ?? value}
+                        wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
+                      />
+                    )}
+                    <Area
+                      type="monotone"
+                      dataKey="value"
+                      stroke="#8b5cf6"
+                      strokeWidth={activeSourceTypes.length > 0 ? 1 : 2}
+                      strokeDasharray={activeSourceTypes.length > 0 ? "4 4" : undefined}
+                      fill="url(#adSpendFill)"
+                      name="value"
+                      legendType="none"
+                    />
+                    {activeSourceTypes.map((src) => (
+                      <Line
+                        key={src}
+                        type="monotone"
+                        dataKey={src}
+                        stroke={SOURCE_COLORS[src] ?? "#888"}
+                        strokeWidth={2}
+                        dot={false}
+                        name={src}
+                        connectNulls
+                      />
+                    ))}
+                  </ComposedChart>
                 </ResponsiveContainer>
               </div>
             </motion.section>
@@ -1280,6 +1049,7 @@ export default function AnalyticsPage() {
           <UploadModal
             workspaceId={workspace.id}
             projectId={currentProject.id}
+            existingBatches={data?.batches ?? []}
             onClose={() => setUploadOpen(false)}
             onImported={() => {
               setUploadOpen(false);
@@ -1525,14 +1295,24 @@ function ImportHistoryPanel({
   );
 }
 
+function hasDateOverlap(
+  a: { start: string | null; end: string | null },
+  b: { start: string | null; end: string | null },
+) {
+  if (!a.start || !a.end || !b.start || !b.end) return false;
+  return a.start <= b.end && b.start <= a.end;
+}
+
 function UploadModal({
   workspaceId,
   projectId,
+  existingBatches,
   onClose,
   onImported,
 }: {
   workspaceId: string;
   projectId: string;
+  existingBatches: PerformanceResponse["batches"];
   onClose: () => void;
   onImported: () => void;
 }) {
@@ -1546,8 +1326,21 @@ function UploadModal({
   const [parsing, setParsing] = useState(false);
   const [sheetLoading, setSheetLoading] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
   const previewTotals = useMemo(() => summarizeRows(preview?.rows ?? []), [preview]);
+
+  const overlappingBatches = useMemo(() => {
+    if (!preview?.reportStart || !preview?.reportEnd) return [];
+    return existingBatches.filter(
+      (batch) =>
+        batch.sourceType === preview.sourceType &&
+        hasDateOverlap(
+          { start: preview.reportStart ?? null, end: preview.reportEnd ?? null },
+          { start: batch.reportStart ? batch.reportStart.slice(0, 10) : null, end: batch.reportEnd ? batch.reportEnd.slice(0, 10) : null },
+        ),
+    );
+  }, [preview, existingBatches]);
   const coreFields = useMemo(
     () => AD_COLUMN_FIELDS.filter((field) => ["campaignName", "adGroupName", "reportDate", "cost", "impressions", "clicks", "conversions"].includes(field.key)),
     []
@@ -1757,23 +1550,6 @@ function UploadModal({
             })}
           </div>
 
-          <div className="grid gap-3">
-            <label className="space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground">매체</span>
-              <select
-                value={sourceChoice}
-                onChange={(event) => {
-                  changeSourceChoice(event.target.value as SourceChoice);
-                }}
-                className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-violet-400"
-              >
-                <option value="AUTO">자동 인식</option>
-                <option value="GOOGLE">Google Ads</option>
-                <option value="META">Meta Ads</option>
-              </select>
-            </label>
-          </div>
-
           <AnimatePresence mode="wait" initial={false}>
             {addMode === "file" ? (
               <motion.label
@@ -1781,15 +1557,23 @@ function UploadModal({
                 initial={{ opacity: 0, x: -12 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -12 }}
-                whileHover={{ y: -2, borderColor: "rgba(139, 92, 246, 0.6)" }}
+                whileHover={!isDragging ? { y: -2, borderColor: "rgba(139, 92, 246, 0.6)" } : undefined}
                 whileTap={{ scale: 0.995 }}
                 transition={{ duration: 0.18 }}
-                className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-border px-4 py-8 text-center transition-colors hover:bg-violet-500/5"
+                className={`flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed px-4 py-8 text-center transition-colors ${
+                  isDragging
+                    ? "border-violet-400 bg-violet-500/10"
+                    : "border-border hover:bg-violet-500/5"
+                }`}
+                onDragEnter={(e) => { e.preventDefault(); setIsDragging(true); }}
+                onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }}
+                onDrop={(e) => { e.preventDefault(); setIsDragging(false); void handleFile(e.dataTransfer.files?.[0] ?? null); }}
               >
                 <motion.div animate={parsing ? { rotate: 360 } : { rotate: 0 }} transition={parsing ? { duration: 1, repeat: Infinity, ease: "linear" } : spring}>
-                  <FileSpreadsheet className="mb-3 h-8 w-8 text-violet-500" />
+                  <FileSpreadsheet className={`mb-3 h-8 w-8 ${isDragging ? "text-violet-400" : "text-violet-500"}`} />
                 </motion.div>
-                <span className="text-sm font-medium">{file ? file.name : "CSV/엑셀 파일 선택"}</span>
+                <span className="text-sm font-medium">{file ? file.name : "파일을 끌어다 놓거나 클릭해서 선택"}</span>
                 <span className="mt-1 text-xs text-muted-foreground">.csv, .xlsx, .xls 파일을 지원합니다.</span>
                 <input
                   type="file"
@@ -1812,6 +1596,7 @@ function UploadModal({
                   <input
                     value={sheetUrl}
                     onChange={(event) => setSheetUrl(event.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") void loadGoogleSheet(); }}
                     placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0"
                     className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition-colors focus:border-violet-400"
                   />
@@ -1837,19 +1622,24 @@ function UploadModal({
             )}
           </AnimatePresence>
 
-          {sourceFileName && !preview && (
-            <motion.button
-              onClick={reparse}
-              disabled={parsing || sheetLoading}
-              whileHover={{ y: -1 }}
-              whileTap={{ scale: 0.97 }}
-              transition={spring}
-              className="inline-flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-sm hover:bg-secondary disabled:opacity-50"
-            >
-              {parsing || sheetLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              다시 분석
-            </motion.button>
-          )}
+          <div className="grid gap-3">
+            <label className="space-y-1.5">
+              <span className="text-xs font-medium text-muted-foreground">매체</span>
+              <select
+                value={sourceChoice}
+                onChange={(event) => {
+                  changeSourceChoice(event.target.value as SourceChoice);
+                }}
+                className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-violet-400"
+              >
+                <option value="AUTO">자동 인식</option>
+                <option value="GOOGLE">Google Ads</option>
+                <option value="META">Meta Ads</option>
+                <option value="LINKEDIN">LinkedIn Ads</option>
+                <option value="MANUAL">직접 입력</option>
+              </select>
+            </label>
+          </div>
 
           {analysis && (
             <motion.div
@@ -1858,11 +1648,24 @@ function UploadModal({
               transition={spring}
               className="rounded-2xl border border-border bg-secondary/20 p-4"
             >
-              <div className="mb-3">
-                <p className="text-sm font-semibold">컬럼 매핑</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  보고서 컬럼명이 달라도 표준 항목에 맞춰 선택하면 그대로 가져올 수 있어요.
-                </p>
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">컬럼 매핑</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    보고서 컬럼명이 달라도 표준 항목에 맞춰 선택하면 그대로 가져올 수 있어요.
+                  </p>
+                </div>
+                <motion.button
+                  onClick={reparse}
+                  disabled={parsing || sheetLoading}
+                  whileHover={{ y: -1 }}
+                  whileTap={{ scale: 0.97 }}
+                  transition={spring}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-border bg-background px-2.5 py-1.5 text-xs hover:bg-secondary disabled:opacity-50"
+                >
+                  {parsing || sheetLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                  다시 분석
+                </motion.button>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 {coreFields.map((field) => (
@@ -1941,6 +1744,27 @@ function UploadModal({
                   {warning}
                 </motion.p>
               ))}
+
+              {overlappingBatches.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-xl border border-red-300/30 bg-red-500/5 px-3 py-2.5 text-xs text-red-600"
+                >
+                  <p className="font-medium">같은 매체·기간 데이터가 이미 있어요</p>
+                  <ul className="mt-1 space-y-0.5 text-red-500/80">
+                    {overlappingBatches.map((b) => (
+                      <li key={b.id}>
+                        · {b.fileName}
+                        {b.reportStart && b.reportEnd
+                          ? ` (${b.reportStart.slice(0, 10)} ~ ${b.reportEnd.slice(0, 10)})`
+                          : ""}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-1.5 text-red-500/70">추가하면 해당 기간 데이터가 중복됩니다. 기존 소스를 먼저 삭제하는 걸 권장해요.</p>
+                </motion.div>
+              )}
 
               <div className="max-h-72 overflow-auto rounded-2xl border border-border">
                 <table className="w-full min-w-[640px] text-xs">

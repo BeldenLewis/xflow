@@ -370,6 +370,81 @@ function getKstDateKey(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
+interface UtmTrendRecord {
+  createdAt: Date;
+  utmSource: string | null;
+  utmMedium: string | null;
+  firstUtmSource: string | null;
+  firstUtmMedium: string | null;
+}
+
+interface DailyUtmRow {
+  date: string;
+  [key: string]: number | string;
+}
+
+interface DailyUtmView {
+  topKeys: string[];
+  rows: DailyUtmRow[];
+}
+
+function buildDailyUtmTrend(
+  records: UtmTrendRecord[],
+  from: Date,
+  to: Date,
+  useFirst: boolean,
+): { source: DailyUtmView; medium: DailyUtmView; combined: DailyUtmView } {
+  const TOP = 5;
+
+  const getKey = (record: UtmTrendRecord, dimension: "source" | "medium" | "combined") => {
+    const src = (useFirst ? record.firstUtmSource : record.utmSource) ?? "";
+    const med = (useFirst ? record.firstUtmMedium : record.utmMedium) ?? "";
+    if (dimension === "source") return src;
+    if (dimension === "medium") return med;
+    return [src, med].filter(Boolean).join(" / ");
+  };
+
+  const buildView = (dimension: "source" | "medium" | "combined"): DailyUtmView => {
+    const totals = new Map<string, number>();
+    const daily = new Map<string, Map<string, number>>();
+
+    for (const record of records) {
+      const key = getKey(record, dimension);
+      if (!key) continue;
+      const date = getKstDateKey(resolveEventTime(record as unknown as TimedRecord));
+      totals.set(key, (totals.get(key) ?? 0) + 1);
+      if (!daily.has(date)) daily.set(date, new Map());
+      const dayMap = daily.get(date)!;
+      dayMap.set(key, (dayMap.get(key) ?? 0) + 1);
+    }
+
+    const topKeys = Array.from(totals.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, TOP)
+      .map(([k]) => k);
+
+    const rows: DailyUtmRow[] = [];
+    let cursor = getKstDayStart(from);
+    const end = getKstDayStart(to);
+    while (cursor.getTime() <= end.getTime()) {
+      const date = getKstDateKey(cursor);
+      const dayMap = daily.get(date) ?? new Map<string, number>();
+      const row: DailyUtmRow = { date };
+      for (const key of topKeys) row[key] = dayMap.get(key) ?? 0;
+      rows.push(row);
+      cursor = new Date(cursor.getTime() + DAY_MS);
+    }
+
+    return { topKeys, rows };
+  };
+
+  return {
+    source: buildView("source"),
+    medium: buildView("medium"),
+    combined: buildView("combined"),
+  };
+}
+
 function buildCumulativeTrend(records: TimedRecord[], from: Date, to: Date, initialCount: number) {
   const dailyCounts = new Map<string, number>();
   for (const record of records) {
@@ -443,7 +518,7 @@ export async function POST(request: Request) {
     }),
     prisma.collectRecord.findMany({
       where: rangeWhere,
-      select: { createdAt: true, data: true },
+      select: { createdAt: true, data: true, utmSource: true, utmMedium: true, firstUtmSource: true, firstUtmMedium: true },
       orderBy: { createdAt: "asc" },
       take: 50000,
     }),
@@ -503,6 +578,19 @@ export async function POST(request: Request) {
     .sort((a, b) => b.count - a.count)
     .slice(0, 5);
 
+  function aggregateUtm(keyFn: (row: { source: string; medium: string; count: number }) => string) {
+    const map = new Map<string, number>();
+    for (const row of utmRows) {
+      const k = keyFn(row);
+      if (!k) continue;
+      map.set(k, (map.get(k) ?? 0) + row.count);
+    }
+    return topEntriesBySectionMax(map, 5);
+  }
+  const utmBySource = aggregateUtm((row) => row.source);
+  const utmByMedium = aggregateUtm((row) => row.medium);
+  const utmBySourceMedium = aggregateUtm((row) => [row.source, row.medium].filter(Boolean).join(" / "));
+
   const rangeChange = previousRangeCount > 0 ? ((rangeCount - previousRangeCount) / previousRangeCount) * 100 : null;
 
   return NextResponse.json({
@@ -518,7 +606,11 @@ export async function POST(request: Request) {
     },
     composition,
     cumulativeTrend: buildCumulativeTrend(heatmapRecords, from, to, cumulativeBeforeRange),
+    dailyUtmTrend: buildDailyUtmTrend(heatmapRecords as unknown as UtmTrendRecord[], from, to, filters?.attribution === "first"),
     utmTop,
+    utmBySource,
+    utmByMedium,
+    utmBySourceMedium,
     heatmap: buildHeatmap(heatmapRecords),
   });
 }

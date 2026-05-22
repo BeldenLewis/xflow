@@ -96,27 +96,6 @@ function detailPeriodKey(date: Date, granularity: DetailDateGranularity) {
   return dateKey(date);
 }
 
-function pickRecordDate(record: {
-  reportDate: Date | null;
-  reportStart: Date | null;
-  createdAt: Date;
-}) {
-  return record.reportDate ?? record.reportStart ?? record.createdAt;
-}
-
-function normalizeRowMetric(row: {
-  cost: number | null;
-  impressions: number | null;
-  clicks: number | null;
-  conversions: number | null;
-}) {
-  const cost = row.cost ?? 0;
-  const impressions = row.impressions ?? 0;
-  const clicks = row.clicks ?? 0;
-  const conversions = row.conversions ?? 0;
-  return { cost, impressions, clicks, conversions };
-}
-
 function withDerivedMetrics<T extends {
   cost: number;
   impressions: number;
@@ -130,6 +109,20 @@ function withDerivedMetrics<T extends {
     cpc: row.clicks > 0 ? row.cost / row.clicks : 0,
     cpm: row.impressions > 0 ? (row.cost / row.impressions) * 1000 : 0,
     costPerConversion: row.conversions > 0 ? row.cost / row.conversions : 0,
+  };
+}
+
+function sumToBase(sum: {
+  cost: number | null;
+  impressions: number | null;
+  clicks: number | null;
+  conversions: number | null;
+}) {
+  return {
+    cost: sum.cost ?? 0,
+    impressions: sum.impressions ?? 0,
+    clicks: sum.clicks ?? 0,
+    conversions: sum.conversions ?? 0,
   };
 }
 
@@ -192,12 +185,6 @@ export async function GET(request: Request) {
       }
     : {};
 
-  const mediaSummaryWhere: Prisma.AdPerformanceRecordWhereInput = {
-    workspaceId,
-    projectId,
-    ...rangeWhere,
-  };
-
   const sourceWhere = sourceType && sourceType !== "ALL" ? { sourceType } : {};
 
   const where: Prisma.AdPerformanceRecordWhereInput = {
@@ -209,6 +196,14 @@ export async function GET(request: Request) {
     ...rangeWhere,
   };
 
+  // mediaSummary: date range only (no source/campaign/adGroup filter — shows all media)
+  const mediaSummaryWhere: Prisma.AdPerformanceRecordWhereInput = {
+    workspaceId,
+    projectId,
+    ...rangeWhere,
+  };
+
+  // campaignSummary: source filter + date range (no campaign/adGroup filter — shows all campaigns in source)
   const campaignSummaryWhere: Prisma.AdPerformanceRecordWhereInput = {
     workspaceId,
     projectId,
@@ -216,6 +211,7 @@ export async function GET(request: Request) {
     ...rangeWhere,
   };
 
+  // adGroupSummary: source + campaign filter + date range
   const adGroupSummaryWhere: Prisma.AdPerformanceRecordWhereInput = {
     workspaceId,
     projectId,
@@ -224,27 +220,48 @@ export async function GET(request: Request) {
     ...rangeWhere,
   };
 
-  const [records, mediaRecords, campaignRecords, adGroupRecords, batches] = await Promise.all([
-    prisma.adPerformanceRecord.findMany({
+  const [totalsAgg, mediaSummaryGroups, campaignGroups, adGroupGroups, trendGroups, batches] = await Promise.all([
+    // Aggregate totals (single row, no data transfer)
+    prisma.adPerformanceRecord.aggregate({
       where,
-      orderBy: [{ reportDate: "desc" }, { createdAt: "desc" }],
-      take: 20_000,
+      _sum: { cost: true, impressions: true, clicks: true, conversions: true, reach: true },
     }),
-    prisma.adPerformanceRecord.findMany({
+
+    // Media summary: group by sourceType
+    prisma.adPerformanceRecord.groupBy({
+      by: ["sourceType"],
       where: mediaSummaryWhere,
-      orderBy: [{ reportDate: "desc" }, { createdAt: "desc" }],
-      take: 20_000,
+      _sum: { cost: true, impressions: true, clicks: true, conversions: true },
     }),
-    prisma.adPerformanceRecord.findMany({
+
+    // Campaign summary: group by sourceType + campaignName
+    prisma.adPerformanceRecord.groupBy({
+      by: ["sourceType", "campaignName"],
       where: campaignSummaryWhere,
-      orderBy: [{ reportDate: "desc" }, { createdAt: "desc" }],
-      take: 20_000,
+      _sum: { cost: true, impressions: true, clicks: true, conversions: true },
+      orderBy: { _sum: { cost: "desc" } },
+      take: 100,
     }),
-    prisma.adPerformanceRecord.findMany({
+
+    // AdGroup summary: group by sourceType + campaignName + adGroupName
+    prisma.adPerformanceRecord.groupBy({
+      by: ["sourceType", "campaignName", "adGroupName"],
       where: adGroupSummaryWhere,
-      orderBy: [{ reportDate: "desc" }, { createdAt: "desc" }],
-      take: 20_000,
+      _sum: { cost: true, impressions: true, clicks: true, conversions: true },
+      orderBy: { _sum: { cost: "desc" } },
+      take: 100,
     }),
+
+    // Pre-aggregated rows for daily trend + detail table
+    // groupBy collapses raw records into (source, campaign, adGroup, date) buckets
+    prisma.adPerformanceRecord.groupBy({
+      by: ["sourceType", "campaignName", "adGroupName", "reportDate", "reportStart"],
+      where,
+      _sum: { cost: true, impressions: true, clicks: true, conversions: true, reach: true },
+      orderBy: [{ reportDate: "desc" }, { reportStart: "desc" }],
+      take: 10_000,
+    }),
+
     prisma.adPerformanceImportBatch.findMany({
       where: { workspaceId, projectId },
       orderBy: { createdAt: "desc" },
@@ -253,70 +270,29 @@ export async function GET(request: Request) {
     }),
   ]);
 
-  const totals = records.reduce((acc, row) => {
-    const metric = normalizeRowMetric(row);
-    acc.cost += metric.cost;
-    acc.impressions += metric.impressions;
-    acc.clicks += metric.clicks;
-    acc.conversions += metric.conversions;
-    acc.reach += row.reach ?? 0;
-    return acc;
-  }, { cost: 0, impressions: 0, reach: 0, clicks: 0, conversions: 0 });
+  // --- Build response objects ---
 
-  const topCampaignMap = new Map<string, {
-    campaignName: string;
-    sourceType: string;
-    cost: number;
-    impressions: number;
-    clicks: number;
-    conversions: number;
-  }>();
+  const totals = {
+    cost: totalsAgg._sum.cost ?? 0,
+    impressions: totalsAgg._sum.impressions ?? 0,
+    clicks: totalsAgg._sum.clicks ?? 0,
+    conversions: totalsAgg._sum.conversions ?? 0,
+    reach: totalsAgg._sum.reach ?? 0,
+  };
 
-  const topAdGroupMap = new Map<string, {
-    campaignName: string;
-    adGroupName: string | null;
-    sourceType: string;
-    cost: number;
-    impressions: number;
-    clicks: number;
-    conversions: number;
-  }>();
+  const mediaSummary = mediaSummaryGroups
+    .map((row) => withDerivedMetrics({ sourceType: row.sourceType, ...sumToBase(row._sum) }))
+    .sort((a, b) => b.cost - a.cost);
 
-  const campaignSummaryMap = new Map<string, {
-    campaignName: string;
-    sourceType: string;
-    cost: number;
-    impressions: number;
-    clicks: number;
-    conversions: number;
-  }>();
+  const campaignSummary = campaignGroups
+    .map((row) => withDerivedMetrics({ sourceType: row.sourceType, campaignName: row.campaignName, ...sumToBase(row._sum) }))
+    .sort((a, b) => b.cost - a.cost);
 
-  const adGroupSummaryMap = new Map<string, {
-    campaignName: string;
-    adGroupName: string | null;
-    sourceType: string;
-    cost: number;
-    impressions: number;
-    clicks: number;
-    conversions: number;
-  }>();
+  const adGroupSummary = adGroupGroups
+    .map((row) => withDerivedMetrics({ sourceType: row.sourceType, campaignName: row.campaignName, adGroupName: row.adGroupName, ...sumToBase(row._sum) }))
+    .sort((a, b) => b.cost - a.cost);
 
-  const sourceMap = new Map<string, {
-    sourceType: string;
-    cost: number;
-    impressions: number;
-    clicks: number;
-    conversions: number;
-  }>();
-
-  const mediaMap = new Map<string, {
-    sourceType: string;
-    cost: number;
-    impressions: number;
-    clicks: number;
-    conversions: number;
-  }>();
-
+  // Build daily trend and detail rows from pre-aggregated trendGroups
   const dailyMap = new Map<string, {
     date: string;
     cost: number;
@@ -324,6 +300,10 @@ export async function GET(request: Request) {
     clicks: number;
     conversions: number;
   }>();
+
+  const dailyBySourceMap = new Map<string, Map<string, {
+    cost: number; impressions: number; clicks: number; conversions: number;
+  }>>();
 
   const detailMap = new Map<string, {
     id: string;
@@ -341,67 +321,32 @@ export async function GET(request: Request) {
   }>();
   const detailPeriodSet = new Set<string>();
 
-  for (const row of records) {
-    const metric = normalizeRowMetric(row);
-    const campaignKey = `${row.sourceType}:${row.campaignName}`;
-    const campaign = topCampaignMap.get(campaignKey) ?? {
-      campaignName: row.campaignName,
-      sourceType: row.sourceType,
-      cost: 0,
-      impressions: 0,
-      clicks: 0,
-      conversions: 0,
-    };
-    campaign.cost += metric.cost;
-    campaign.impressions += metric.impressions;
-    campaign.clicks += metric.clicks;
-    campaign.conversions += metric.conversions;
-    topCampaignMap.set(campaignKey, campaign);
+  for (const row of trendGroups) {
+    // Fall back to reportStart when reportDate is absent (period reports without daily breakdown)
+    const effectiveDate = row.reportDate ?? row.reportStart ?? new Date();
+    const cost = row._sum.cost ?? 0;
+    const impressions = row._sum.impressions ?? 0;
+    const clicks = row._sum.clicks ?? 0;
+    const conversions = row._sum.conversions ?? 0;
 
-    const adGroupKey = `${row.sourceType}:${row.campaignName}:${row.adGroupName ?? ""}`;
-    const adGroup = topAdGroupMap.get(adGroupKey) ?? {
-      campaignName: row.campaignName,
-      adGroupName: row.adGroupName,
-      sourceType: row.sourceType,
-      cost: 0,
-      impressions: 0,
-      clicks: 0,
-      conversions: 0,
-    };
-    adGroup.cost += metric.cost;
-    adGroup.impressions += metric.impressions;
-    adGroup.clicks += metric.clicks;
-    adGroup.conversions += metric.conversions;
-    topAdGroupMap.set(adGroupKey, adGroup);
+    const dKey = dateKey(effectiveDate);
+    const day = dailyMap.get(dKey) ?? { date: dKey, cost: 0, impressions: 0, clicks: 0, conversions: 0 };
+    day.cost += cost;
+    day.impressions += impressions;
+    day.clicks += clicks;
+    day.conversions += conversions;
+    dailyMap.set(dKey, day);
 
-    const source = sourceMap.get(row.sourceType) ?? {
-      sourceType: row.sourceType,
-      cost: 0,
-      impressions: 0,
-      clicks: 0,
-      conversions: 0,
-    };
-    source.cost += metric.cost;
-    source.impressions += metric.impressions;
-    source.clicks += metric.clicks;
-    source.conversions += metric.conversions;
-    sourceMap.set(row.sourceType, source);
+    if (!dailyBySourceMap.has(dKey)) dailyBySourceMap.set(dKey, new Map());
+    const srcDay = dailyBySourceMap.get(dKey)!;
+    const prevSrc = srcDay.get(row.sourceType) ?? { cost: 0, impressions: 0, clicks: 0, conversions: 0 };
+    prevSrc.cost += cost;
+    prevSrc.impressions += impressions;
+    prevSrc.clicks += clicks;
+    prevSrc.conversions += conversions;
+    srcDay.set(row.sourceType, prevSrc);
 
-    const key = dateKey(pickRecordDate(row));
-    const day = dailyMap.get(key) ?? {
-      date: key,
-      cost: 0,
-      impressions: 0,
-      clicks: 0,
-      conversions: 0,
-    };
-    day.cost += metric.cost;
-    day.impressions += metric.impressions;
-    day.clicks += metric.clicks;
-    day.conversions += metric.conversions;
-    dailyMap.set(key, day);
-
-    const periodKey = detailPeriodKey(pickRecordDate(row), detailDateGranularity);
+    const periodKey = detailPeriodKey(effectiveDate, detailDateGranularity);
     detailPeriodSet.add(periodKey);
     const detailAdGroupName = detailGroupBy === "adGroup" ? row.adGroupName : null;
     const detailKey = `${periodKey}:${row.sourceType}:${row.campaignName}:${detailAdGroupName ?? ""}`;
@@ -419,65 +364,12 @@ export async function GET(request: Request) {
       clicks: 0,
       conversions: 0,
     };
-    detail.cost += metric.cost;
-    detail.impressions += metric.impressions;
-    detail.reach += row.reach ?? 0;
-    detail.clicks += metric.clicks;
-    detail.conversions += metric.conversions;
+    detail.cost += cost;
+    detail.impressions += impressions;
+    detail.reach += row._sum.reach ?? 0;
+    detail.clicks += clicks;
+    detail.conversions += conversions;
     detailMap.set(detailKey, detail);
-  }
-
-  for (const row of mediaRecords) {
-    const metric = normalizeRowMetric(row);
-    const media = mediaMap.get(row.sourceType) ?? {
-      sourceType: row.sourceType,
-      cost: 0,
-      impressions: 0,
-      clicks: 0,
-      conversions: 0,
-    };
-    media.cost += metric.cost;
-    media.impressions += metric.impressions;
-    media.clicks += metric.clicks;
-    media.conversions += metric.conversions;
-    mediaMap.set(row.sourceType, media);
-  }
-
-  for (const row of campaignRecords) {
-    const metric = normalizeRowMetric(row);
-    const campaignKey = `${row.sourceType}:${row.campaignName}`;
-    const campaign = campaignSummaryMap.get(campaignKey) ?? {
-      campaignName: row.campaignName,
-      sourceType: row.sourceType,
-      cost: 0,
-      impressions: 0,
-      clicks: 0,
-      conversions: 0,
-    };
-    campaign.cost += metric.cost;
-    campaign.impressions += metric.impressions;
-    campaign.clicks += metric.clicks;
-    campaign.conversions += metric.conversions;
-    campaignSummaryMap.set(campaignKey, campaign);
-  }
-
-  for (const row of adGroupRecords) {
-    const metric = normalizeRowMetric(row);
-    const adGroupKey = `${row.sourceType}:${row.campaignName}:${row.adGroupName ?? ""}`;
-    const adGroup = adGroupSummaryMap.get(adGroupKey) ?? {
-      campaignName: row.campaignName,
-      adGroupName: row.adGroupName,
-      sourceType: row.sourceType,
-      cost: 0,
-      impressions: 0,
-      clicks: 0,
-      conversions: 0,
-    };
-    adGroup.cost += metric.cost;
-    adGroup.impressions += metric.impressions;
-    adGroup.clicks += metric.clicks;
-    adGroup.conversions += metric.conversions;
-    adGroupSummaryMap.set(adGroupKey, adGroup);
   }
 
   const sortedDetailPeriods = Array.from(detailPeriodSet).sort((a, b) => b.localeCompare(a));
@@ -508,13 +400,17 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     totals: withDerivedMetrics(totals),
-    sourceSummary: Array.from(sourceMap.values()).map(withDerivedMetrics).sort((a, b) => b.cost - a.cost),
-    mediaSummary: Array.from(mediaMap.values()).map(withDerivedMetrics).sort((a, b) => b.cost - a.cost),
-    campaignSummary: Array.from(campaignSummaryMap.values()).map(withDerivedMetrics).sort((a, b) => b.cost - a.cost).slice(0, 100),
-    adGroupSummary: Array.from(adGroupSummaryMap.values()).map(withDerivedMetrics).sort((a, b) => b.cost - a.cost).slice(0, 100),
-    topCampaigns: Array.from(topCampaignMap.values()).map(withDerivedMetrics).sort((a, b) => b.cost - a.cost).slice(0, 50),
-    topAdGroups: Array.from(topAdGroupMap.values()).map(withDerivedMetrics).sort((a, b) => b.cost - a.cost).slice(0, 50),
+    sourceSummary: mediaSummary,
+    mediaSummary,
+    campaignSummary,
+    adGroupSummary,
+    topCampaigns: campaignSummary.slice(0, 50),
+    topAdGroups: adGroupSummary.slice(0, 50),
     dailyTrend: Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date)),
+    dailyTrendBySource: Array.from(dailyMap.keys()).sort().map((date) => ({
+      date,
+      sources: Object.fromEntries(dailyBySourceMap.get(date) ?? []),
+    })),
     detailRows,
     detailPeriodOptions: sortedDetailPeriods.map((value) => ({
       value,

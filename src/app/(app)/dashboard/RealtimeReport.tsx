@@ -2,7 +2,8 @@
 
 import { Activity, CalendarDays, Clock3, TrendingUp, Users } from "lucide-react";
 import type { ElementType } from "react";
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { useState } from "react";
+import { Area, AreaChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatKstDateTime } from "@/lib/datetime";
 
 interface MetricChange {
@@ -39,6 +40,14 @@ export interface RealtimeReportData {
     count: number;
     percent: number;
   }>;
+  utmBySource: Array<{ label: string; count: number; percent: number }>;
+  utmByMedium: Array<{ label: string; count: number; percent: number }>;
+  utmBySourceMedium: Array<{ label: string; count: number; percent: number }>;
+  dailyUtmTrend?: {
+    source: { topKeys: string[]; rows: Array<{ date: string; [key: string]: number | string }> };
+    medium: { topKeys: string[]; rows: Array<{ date: string; [key: string]: number | string }> };
+    combined: { topKeys: string[]; rows: Array<{ date: string; [key: string]: number | string }> };
+  };
   heatmap: {
     dayLabels: string[];
     matrix: number[][];
@@ -199,6 +208,160 @@ function CompositionSection({ section }: { section: RealtimeReportData["composit
   );
 }
 
+const UTM_TREND_COLORS = ["#8b5cf6", "#ec4899", "#f59e0b", "#0a66c2", "#10b981"];
+
+function UtmTrendChart({ trend }: { trend: RealtimeReportData["dailyUtmTrend"] }) {
+  const [tab, setTab] = useState<"source" | "medium" | "combined">("source");
+
+  const view = trend?.[tab];
+  const { topKeys = [], rows = [] } = view ?? {};
+
+  const hasData = topKeys.length > 0 && rows.some((row) =>
+    topKeys.some((k) => Number(row[k] ?? 0) > 0)
+  );
+
+  return (
+    <div className="rounded-2xl border border-border bg-background p-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-violet-500" />
+            <h3 className="text-sm font-semibold">유입 경로별 등록 추이</h3>
+          </div>
+          <p className="mt-0.5 text-xs text-muted-foreground">UTM 기준 상위 5개 경로의 일별 등록 흐름입니다.</p>
+        </div>
+        <div className="grid h-8 grid-cols-3 rounded-xl border border-border bg-secondary/30 p-0.5 shrink-0">
+          {(["source", "medium", "combined"] as const).map((t, i) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`rounded-lg px-2.5 text-xs font-medium transition-colors ${
+                tab === t ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {["소스", "매체", "소스/매체"][i]}
+            </button>
+          ))}
+        </div>
+      </div>
+      {hasData ? (
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={rows} margin={{ top: 4, right: 10, bottom: 4, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.45} />
+            <XAxis
+              dataKey="date"
+              tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+              tickLine={false}
+              axisLine={false}
+              minTickGap={20}
+              tickFormatter={(v: string) => v.slice(5).replace("-", ".")}
+            />
+            <YAxis
+              tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+              tickLine={false}
+              axisLine={false}
+              allowDecimals={false}
+              width={32}
+            />
+            <Tooltip
+              formatter={(value, name) => [`${formatNumber(Number(value))}건`, String(name)]}
+              labelFormatter={(label) => String(label)}
+              contentStyle={{
+                backgroundColor: "hsl(var(--card))",
+                border: "1px solid hsl(var(--border))",
+                borderRadius: "0.75rem",
+                fontSize: "12px",
+              }}
+            />
+            <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+            {topKeys.map((key, i) => (
+              <Line
+                key={key}
+                type="monotone"
+                dataKey={key}
+                stroke={UTM_TREND_COLORS[i % UTM_TREND_COLORS.length]}
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 4 }}
+                connectNulls
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      ) : (
+        <div className="flex h-[220px] items-center justify-center rounded-2xl border border-dashed border-border text-sm text-muted-foreground">
+          선택한 기간에 UTM 유입 데이터가 아직 없습니다.
+        </div>
+      )}
+    </div>
+  );
+}
+
+type UtmTab = "source" | "medium" | "combined";
+
+const UTM_TABS: Array<{ value: UtmTab; label: string }> = [
+  { value: "source", label: "소스" },
+  { value: "medium", label: "매체" },
+  { value: "combined", label: "소스/매체" },
+];
+
+function UtmBreakdownSection({ data }: { data: RealtimeReportData }) {
+  const [tab, setTab] = useState<UtmTab>("source");
+
+  const items =
+    tab === "source" ? data.utmBySource
+    : tab === "medium" ? data.utmByMedium
+    : data.utmBySourceMedium;
+
+  return (
+    <section className="rounded-[24px] border border-border bg-background p-5">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <TrendingUp className="w-4 h-4 text-violet-500" />
+          <h3 className="text-sm font-semibold">유입 경로 TOP 5</h3>
+        </div>
+        <div className="grid h-8 grid-cols-3 rounded-xl border border-border bg-secondary/30 p-0.5">
+          {UTM_TABS.map((t) => (
+            <button
+              key={t.value}
+              onClick={() => setTab(t.value)}
+              className={`relative rounded-lg px-3 text-xs font-medium transition-colors ${
+                tab === t.value
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {items.length > 0 ? (
+        <div className="space-y-2.5">
+          {items.map((item, index) => (
+            <div key={item.label}>
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="shrink-0 font-semibold text-muted-foreground">#{index + 1}</span>
+                  <span className="truncate font-medium">{item.label}</span>
+                </div>
+                <span className="shrink-0 font-mono font-semibold">{formatNumber(item.count)}건</span>
+              </div>
+              <div className="mt-1.5 h-1.5 rounded-full bg-secondary overflow-hidden">
+                <div className="h-full rounded-full bg-violet-500/70 transition-all duration-300" style={{ width: `${Math.min(item.percent, 100)}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="rounded-2xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+          선택한 기간에 UTM 유입 데이터가 아직 없습니다.
+        </p>
+      )}
+    </section>
+  );
+}
+
 function Heatmap({ heatmap }: { heatmap: RealtimeReportData["heatmap"] }) {
   const hours = Array.from({ length: 24 }, (_, hour) => hour);
   const gridClass = "grid grid-cols-[24px_repeat(24,minmax(20px,1fr))] gap-1 items-center";
@@ -304,6 +467,11 @@ export default function RealtimeReport({ data, loading, rangeLabel }: Props) {
         <div className="mt-4">
           <CumulativeLineChart points={data.cumulativeTrend} />
         </div>
+        {data.dailyUtmTrend && (
+          <div className="mt-4">
+            <UtmTrendChart trend={data.dailyUtmTrend} />
+          </div>
+        )}
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
@@ -323,36 +491,7 @@ export default function RealtimeReport({ data, loading, rangeLabel }: Props) {
           )}
         </section>
 
-        <section className="rounded-[24px] border border-border bg-background p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <TrendingUp className="w-4 h-4 text-violet-500" />
-            <h3 className="text-sm font-semibold">사전등록 UTM TOP 5</h3>
-          </div>
-          {data.utmTop.length > 0 ? (
-            <div className="space-y-2">
-              {data.utmTop.map((item, index) => (
-                <div key={`${item.source}-${item.medium}-${item.campaign}`} className="rounded-2xl border border-border px-3 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-                      <span className="text-xs font-semibold text-muted-foreground">#{index + 1}</span>
-                      <span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-xs font-medium text-violet-500">{item.source}</span>
-                      <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">{item.medium}</span>
-                      <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">{item.campaign}</span>
-                    </div>
-                    <span className="shrink-0 text-sm font-semibold">{formatNumber(item.count)}건</span>
-                  </div>
-                  <div className="mt-2 h-1.5 rounded-full bg-secondary overflow-hidden">
-                    <div className="h-full rounded-full bg-violet-500/70" style={{ width: `${Math.min(item.percent, 100)}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="rounded-2xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-              선택한 기간에 UTM 유입 데이터가 아직 없습니다.
-            </p>
-          )}
-        </section>
+        <UtmBreakdownSection data={data} />
       </div>
 
       <section className="rounded-[24px] border border-border bg-background p-5">

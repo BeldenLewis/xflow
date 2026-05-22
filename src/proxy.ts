@@ -10,6 +10,7 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/auth/callback") ||
     pathname.startsWith("/api/collect") ||
     pathname.startsWith("/api/webinar/") ||
+    pathname === "/webinar/sample" ||
     pathname.match(/^\/webinar\/[^/]+\/live/) ||
     pathname.startsWith("/api/public") ||
     pathname.startsWith("/api/shorten-url") ||

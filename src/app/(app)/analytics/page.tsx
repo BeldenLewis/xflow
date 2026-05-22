@@ -4,13 +4,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import * as XLSX from "xlsx";
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   BarChart3,
+  Calendar,
   Database,
+  Download,
   FileSpreadsheet,
+  LayoutGrid,
+  List,
   Loader2,
   History,
   RefreshCw,
   Trash2,
+  TrendingDown,
+  TrendingUp,
   Upload,
   X,
 } from "lucide-react";
@@ -283,16 +292,26 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [rangeDays, setRangeDays] = useState("30");
+  const [customDateFrom, setCustomDateFrom] = useState(() => todayInputValue(-30));
+  const [customDateTo, setCustomDateTo] = useState(() => todayInputValue(0));
   const [sourceFilter, setSourceFilter] = useState("ALL");
   const [selectedCampaignName, setSelectedCampaignName] = useState<string | null>(null);
   const [selectedAdGroupName, setSelectedAdGroupName] = useState<string | null>(null);
   const [chartMetric, setChartMetric] = useState<ChartMetric>("cost");
+  const [secondChartMetric, setSecondChartMetric] = useState<ChartMetric>("conversions");
   const [detailGroupBy, setDetailGroupBy] = useState<DetailGroupBy>("campaign");
   const [detailDateGranularity, setDetailDateGranularity] = useState<DetailDateGranularity>("day");
   const [detailPeriod, setDetailPeriod] = useState<string | null>(null);
   const [detailPage, setDetailPage] = useState(1);
+  const [detailSortCol, setDetailSortCol] = useState<string | null>(null);
+  const [detailSortDir, setDetailSortDir] = useState<"asc" | "desc">("asc");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [previousTotals, setPreviousTotals] = useState<PerformanceResponse["totals"] | null>(null);
+  const [previousChartRows, setPreviousChartRows] = useState<Array<{ date: string; cost: number; impressions: number; clicks: number; conversions: number }>>([]);
+  const [campaignViewMode, setCampaignViewMode] = useState<"scroll" | "grid">("scroll");
+  const [adGroupViewMode, setAdGroupViewMode] = useState<"scroll" | "grid">("scroll");
+  const [showCampaigns, setShowCampaigns] = useState(false);
 
   const selectSource = (nextSource: string) => {
     setSourceFilter(nextSource);
@@ -319,6 +338,15 @@ export default function AnalyticsPage() {
     setRangeDays(nextRange);
     setDetailPeriod(null);
     setDetailPage(1);
+  };
+
+  const handleDetailSort = (col: string) => {
+    if (detailSortCol === col) {
+      setDetailSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setDetailSortCol(col);
+      setDetailSortDir("asc");
+    }
   };
 
   const changeDetailGroupBy = (nextGroupBy: DetailGroupBy) => {
@@ -354,9 +382,23 @@ export default function AnalyticsPage() {
         detailPageSize: String(DETAIL_PAGE_SIZE),
       });
 
-      if (rangeDays !== "all") {
-        params.set("from", `${todayInputValue(-Number(rangeDays))}T00:00:00+09:00`);
-        params.set("to", `${todayInputValue(0)}T23:59:59+09:00`);
+      let fromDate: string | null = null;
+      let toDate: string | null = null;
+
+      if (rangeDays === "custom") {
+        if (customDateFrom) {
+          fromDate = customDateFrom;
+          params.set("from", `${customDateFrom}T00:00:00+09:00`);
+        }
+        if (customDateTo) {
+          toDate = customDateTo;
+          params.set("to", `${customDateTo}T23:59:59+09:00`);
+        }
+      } else if (rangeDays !== "all") {
+        fromDate = todayInputValue(-Number(rangeDays));
+        toDate = todayInputValue(0);
+        params.set("from", `${fromDate}T00:00:00+09:00`);
+        params.set("to", `${toDate}T23:59:59+09:00`);
       }
 
       if (selectedCampaignName) params.set("campaignName", selectedCampaignName);
@@ -368,6 +410,41 @@ export default function AnalyticsPage() {
       if (!res.ok) throw new Error(next?.error ?? "광고 성과를 불러오지 못했어요");
       setData(next);
       hasLoadedRef.current = true;
+
+      // Fetch previous period for comparison (② and ⑭)
+      if (rangeDays !== "all" && rangeDays !== "custom" && fromDate && toDate) {
+        const nDays = Number(rangeDays);
+        const prevFrom = todayInputValue(-nDays * 2);
+        const prevTo = todayInputValue(-nDays);
+        const prevParams = new URLSearchParams({
+          workspaceId: workspace.id,
+          projectId: currentProject.id,
+          sourceType: sourceFilter,
+          from: `${prevFrom}T00:00:00+09:00`,
+          to: `${prevTo}T23:59:59+09:00`,
+          detailGroupBy: "campaign",
+          detailDateGranularity: "day",
+          detailPage: "1",
+          detailPageSize: "1",
+        });
+        try {
+          const prevRes = await fetch(`/api/ad-performance?${prevParams.toString()}`);
+          const prevData = await prevRes.json().catch(() => null);
+          if (prevRes.ok && prevData?.totals) {
+            setPreviousTotals(prevData.totals as PerformanceResponse["totals"]);
+            setPreviousChartRows(prevData.dailyTrend ?? []);
+          } else {
+            setPreviousTotals(null);
+            setPreviousChartRows([]);
+          }
+        } catch {
+          setPreviousTotals(null);
+          setPreviousChartRows([]);
+        }
+      } else {
+        setPreviousTotals(null);
+        setPreviousChartRows([]);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "광고 성과를 불러오지 못했어요");
       if (isInitialLoad) setData(null);
@@ -379,6 +456,8 @@ export default function AnalyticsPage() {
     workspace,
     currentProject,
     rangeDays,
+    customDateFrom,
+    customDateTo,
     sourceFilter,
     selectedCampaignName,
     selectedAdGroupName,
@@ -422,14 +501,23 @@ export default function AnalyticsPage() {
     const bySourceMap = new Map(
       (data?.dailyTrendBySource ?? []).map((r) => [r.date, r.sources])
     );
-    return (data?.dailyTrend ?? []).map((row) => {
+    return (data?.dailyTrend ?? []).map((row, idx) => {
       const sources = bySourceMap.get(row.date) ?? {};
       const sourceValues = Object.fromEntries(
         Object.entries(sources).map(([src, vals]) => [src, getChartMetricValue(vals, chartMetric)])
       );
-      return { ...row, value: getChartMetricValue(row, chartMetric), ...sourceValues };
+      const prevRow = previousChartRows[idx];
+      const prevValue = prevRow ? getChartMetricValue(prevRow, chartMetric) : null;
+      return { ...row, value: getChartMetricValue(row, chartMetric), prevValue, ...sourceValues };
     });
-  }, [data, chartMetric]);
+  }, [data, chartMetric, previousChartRows]);
+
+  const secondChartRows = useMemo(() => {
+    return (data?.dailyTrend ?? []).map((row) => ({
+      ...row,
+      value: getChartMetricValue(row, secondChartMetric),
+    }));
+  }, [data, secondChartMetric]);
 
   const activeSourceTypes = useMemo(() => {
     if (sourceFilter !== "ALL") return [];
@@ -440,7 +528,22 @@ export default function AnalyticsPage() {
     return Array.from(set);
   }, [data, sourceFilter]);
   const chartMetricLabel = CHART_METRICS.find((metric) => metric.value === chartMetric)?.label ?? "지출";
-  const detailRows = data?.detailRows ?? data?.recentRows ?? [];
+  const rawDetailRows = data?.detailRows ?? data?.recentRows ?? [];
+  const detailRows = useMemo(() => {
+    if (!detailSortCol) return rawDetailRows;
+    const sorted = [...rawDetailRows].sort((a, b) => {
+      const col = detailSortCol as keyof DetailRow;
+      const aVal = a[col] ?? "";
+      const bVal = b[col] ?? "";
+      if (typeof aVal === "number" && typeof bVal === "number") {
+        return detailSortDir === "asc" ? aVal - bVal : bVal - aVal;
+      }
+      return detailSortDir === "asc"
+        ? String(aVal).localeCompare(String(bVal))
+        : String(bVal).localeCompare(String(aVal));
+    });
+    return sorted;
+  }, [rawDetailRows, detailSortCol, detailSortDir]);
   const detailPagination = data?.detailPagination ?? {
     page: detailPage,
     pageSize: DETAIL_PAGE_SIZE,
@@ -515,17 +618,43 @@ export default function AnalyticsPage() {
               </motion.button>
             ))}
           </div>
-          <select
-            value={rangeDays}
-            onChange={(event) => changeRangeDays(event.target.value)}
-            className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-violet-400"
-          >
-            <option value="7">최근 7일</option>
-            <option value="30">최근 30일</option>
-            <option value="90">최근 90일</option>
-            <option value="365">최근 365일</option>
-            <option value="all">전체 기간</option>
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              value={rangeDays}
+              onChange={(event) => changeRangeDays(event.target.value)}
+              className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-violet-400"
+            >
+              <option value="7">최근 7일</option>
+              <option value="30">최근 30일</option>
+              <option value="90">최근 90일</option>
+              <option value="365">최근 365일</option>
+              <option value="all">전체 기간</option>
+              <option value="custom">직접 입력</option>
+            </select>
+            {rangeDays === "custom" && (
+              <motion.div
+                initial={{ opacity: 0, x: -8 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={spring}
+                className="flex items-center gap-1.5"
+              >
+                <Calendar className="h-4 w-4 text-muted-foreground" />
+                <input
+                  type="date"
+                  value={customDateFrom}
+                  onChange={(e) => setCustomDateFrom(e.target.value)}
+                  className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-violet-400"
+                />
+                <span className="text-xs text-muted-foreground">~</span>
+                <input
+                  type="date"
+                  value={customDateTo}
+                  onChange={(e) => setCustomDateTo(e.target.value)}
+                  className="h-10 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-violet-400"
+                />
+              </motion.div>
+            )}
+          </div>
           <motion.button
             onClick={fetchData}
             whileHover={{ y: -1 }}
@@ -560,13 +689,13 @@ export default function AnalyticsPage() {
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
-        <MetricCard label="지출" value={formatKRW(totals?.cost)} sub={currentScopeLabel} />
-        <MetricCard label="CPM" value={formatKRW(totals?.cpm)} sub={`노출 ${formatNumber(totals?.impressions)}`} />
-        <MetricCard label="CPC" value={formatKRW(totals?.cpc)} sub={`클릭 ${formatNumber(totals?.clicks)}`} />
-        <MetricCard label="CTR" value={formatPct(totals?.ctr)} />
-        <MetricCard label="CVR" value={formatPct(totals?.cvr)} sub={`결과 ${formatNumber(totals?.conversions)}`} />
-        <MetricCard label="전환수" value={formatNumber(totals?.conversions)} />
-        <MetricCard label="결과당 비용" value={formatKRW(totals?.costPerConversion)} />
+        <MetricCard label="지출" value={formatKRW(totals?.cost)} sub={currentScopeLabel} currentRaw={totals?.cost} previousRaw={previousTotals?.cost ?? undefined} lowerIsBetter />
+        <MetricCard label="CPM" value={formatKRW(totals?.cpm)} sub={`노출 ${formatNumber(totals?.impressions)}`} currentRaw={totals?.cpm} previousRaw={previousTotals?.cpm ?? undefined} lowerIsBetter />
+        <MetricCard label="CPC" value={formatKRW(totals?.cpc)} sub={`클릭 ${formatNumber(totals?.clicks)}`} currentRaw={totals?.cpc} previousRaw={previousTotals?.cpc ?? undefined} lowerIsBetter />
+        <MetricCard label="CTR" value={formatPct(totals?.ctr)} currentRaw={totals?.ctr} previousRaw={previousTotals?.ctr ?? undefined} />
+        <MetricCard label="CVR" value={formatPct(totals?.cvr)} sub={`결과 ${formatNumber(totals?.conversions)}`} currentRaw={totals?.cvr} previousRaw={previousTotals?.cvr ?? undefined} />
+        <MetricCard label="전환수" value={formatNumber(totals?.conversions)} currentRaw={totals?.conversions} previousRaw={previousTotals?.conversions ?? undefined} />
+        <MetricCard label="결과당 비용" value={formatKRW(totals?.costPerConversion)} currentRaw={totals?.costPerConversion} previousRaw={previousTotals?.costPerConversion ?? undefined} lowerIsBetter />
       </div>
 
       {loading ? (
@@ -655,8 +784,24 @@ export default function AnalyticsPage() {
                 ))}
               </div>
 
+              {/* ALL view: show drill-down toggle button */}
+              {sourceFilter === "ALL" && (
+                <div className="mt-2 flex justify-center">
+                  <motion.button
+                    onClick={() => setShowCampaigns((v) => !v)}
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.96 }}
+                    transition={spring}
+                    className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  >
+                    {showCampaigns ? <List className="h-3.5 w-3.5" /> : <LayoutGrid className="h-3.5 w-3.5" />}
+                    {showCampaigns ? "캠페인 접기" : "캠페인별로 보기 ▾"}
+                  </motion.button>
+                </div>
+              )}
+
               <AnimatePresence>
-                {sourceFilter !== "ALL" && (
+                {(sourceFilter !== "ALL" || showCampaigns) && (
                   <motion.div
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: "auto" }}
@@ -666,9 +811,23 @@ export default function AnalyticsPage() {
                   >
                     <div className="mt-3 border-t border-border pt-3">
                       <div className="mb-2 flex items-center justify-between gap-2">
-                        <p className="text-xs font-medium text-muted-foreground">광고 캠페인</p>
+                        <p className="text-xs font-medium text-muted-foreground">
+                          {sourceFilter === "ALL" ? "캠페인 드릴다운" : "광고 캠페인"}
+                        </p>
                         <div className="flex items-center gap-2">
                           <span className="text-[11px] text-muted-foreground">{data.campaignSummary.length.toLocaleString()}개</span>
+                          {data.campaignSummary.length > 6 && (
+                            <motion.button
+                              onClick={() => setCampaignViewMode((m) => m === "scroll" ? "grid" : "scroll")}
+                              whileHover={{ y: -1 }}
+                              whileTap={{ scale: 0.96 }}
+                              transition={spring}
+                              className="rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                            >
+                              {campaignViewMode === "scroll" ? <LayoutGrid className="inline h-3 w-3 mr-1" /> : <List className="inline h-3 w-3 mr-1" />}
+                              {campaignViewMode === "scroll" ? "그리드 보기" : "스크롤 보기"}
+                            </motion.button>
+                          )}
                           {(selectedCampaignName || selectedAdGroupName) && (
                             <motion.button
                               onClick={() => selectCampaign(null)}
@@ -682,27 +841,41 @@ export default function AnalyticsPage() {
                           )}
                         </div>
                       </div>
-                      <div className="flex gap-2 overflow-x-auto px-0.5 py-1.5">
-                        {data.campaignSummary.map((campaign) => (
-                          <PerformancePickCard
-                            key={`${campaign.sourceType}:${campaign.campaignName}`}
-                            title={campaign.campaignName}
-                            meta={`지출 ${formatKRW(campaign.cost)} · 전환 ${formatNumber(campaign.conversions)}`}
-                            active={selectedCampaignName === campaign.campaignName}
-                            onClick={() => selectCampaign(selectedCampaignName === campaign.campaignName ? null : campaign.campaignName)}
-                          />
-                        ))}
-                        {data.campaignSummary.length === 0 && (
-                          <CompactEmpty label="선택한 매체에서 캠페인을 찾지 못했어요." />
-                        )}
-                      </div>
+                      {campaignViewMode === "grid" && data.campaignSummary.length > 6 ? (
+                        <div className="grid grid-cols-3 gap-2 px-0.5 py-1.5">
+                          {data.campaignSummary.map((campaign) => (
+                            <PerformancePickCard
+                              key={`${campaign.sourceType}:${campaign.campaignName}`}
+                              title={campaign.campaignName}
+                              meta={`${SOURCE_LABELS[campaign.sourceType] ?? campaign.sourceType} · 지출 ${formatKRW(campaign.cost)} · 전환 ${formatNumber(campaign.conversions)}`}
+                              active={selectedCampaignName === campaign.campaignName}
+                              onClick={() => selectCampaign(selectedCampaignName === campaign.campaignName ? null : campaign.campaignName)}
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex gap-2 overflow-x-auto px-0.5 py-1.5">
+                          {data.campaignSummary.map((campaign) => (
+                            <PerformancePickCard
+                              key={`${campaign.sourceType}:${campaign.campaignName}`}
+                              title={campaign.campaignName}
+                              meta={`${sourceFilter === "ALL" ? (SOURCE_LABELS[campaign.sourceType] ?? campaign.sourceType) + " · " : ""}지출 ${formatKRW(campaign.cost)} · 전환 ${formatNumber(campaign.conversions)}`}
+                              active={selectedCampaignName === campaign.campaignName}
+                              onClick={() => selectCampaign(selectedCampaignName === campaign.campaignName ? null : campaign.campaignName)}
+                            />
+                          ))}
+                          {data.campaignSummary.length === 0 && (
+                            <CompactEmpty label="선택한 매체에서 캠페인을 찾지 못했어요." />
+                          )}
+                        </div>
+                      )}
                     </div>
                   </motion.div>
                 )}
               </AnimatePresence>
 
               <AnimatePresence>
-                {sourceFilter !== "ALL" && selectedCampaignName && (
+                {(sourceFilter !== "ALL" || showCampaigns) && selectedCampaignName && (
                   <motion.div
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: "auto" }}
@@ -713,32 +886,60 @@ export default function AnalyticsPage() {
                     <div className="mt-3 border-t border-border pt-3">
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <p className="text-xs font-medium text-muted-foreground">광고세트 / 광고그룹</p>
-                        {selectedAdGroupName && (
-                          <motion.button
-                            onClick={() => selectAdGroup(null)}
-                            whileHover={{ y: -1 }}
-                            whileTap={{ scale: 0.96 }}
-                            transition={spring}
-                            className="rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                          >
-                            광고세트 해제
-                          </motion.button>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {data.adGroupSummary.length > 6 && (
+                            <motion.button
+                              onClick={() => setAdGroupViewMode((m) => m === "scroll" ? "grid" : "scroll")}
+                              whileHover={{ y: -1 }}
+                              whileTap={{ scale: 0.96 }}
+                              transition={spring}
+                              className="rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                            >
+                              {adGroupViewMode === "scroll" ? <LayoutGrid className="inline h-3 w-3 mr-1" /> : <List className="inline h-3 w-3 mr-1" />}
+                              {adGroupViewMode === "scroll" ? "그리드 보기" : "스크롤 보기"}
+                            </motion.button>
+                          )}
+                          {selectedAdGroupName && (
+                            <motion.button
+                              onClick={() => selectAdGroup(null)}
+                              whileHover={{ y: -1 }}
+                              whileTap={{ scale: 0.96 }}
+                              transition={spring}
+                              className="rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                            >
+                              광고세트 해제
+                            </motion.button>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex gap-2 overflow-x-auto px-0.5 py-1.5">
-                        {data.adGroupSummary.map((adGroup) => (
-                          <PerformancePickCard
-                            key={`${adGroup.sourceType}:${adGroup.campaignName}:${adGroup.adGroupName ?? ""}`}
-                            title={adGroup.adGroupName || "광고세트/그룹 없음"}
-                            meta={`지출 ${formatKRW(adGroup.cost)} · 전환 ${formatNumber(adGroup.conversions)}`}
-                            active={selectedAdGroupName === adGroup.adGroupName}
-                            onClick={() => selectAdGroup(selectedAdGroupName === adGroup.adGroupName ? null : adGroup.adGroupName ?? null)}
-                          />
-                        ))}
-                        {data.adGroupSummary.length === 0 && (
-                          <CompactEmpty label="이 캠페인에서 광고세트/광고그룹 데이터를 찾지 못했어요." />
-                        )}
-                      </div>
+                      {adGroupViewMode === "grid" && data.adGroupSummary.length > 6 ? (
+                        <div className="grid grid-cols-3 gap-2 px-0.5 py-1.5">
+                          {data.adGroupSummary.map((adGroup) => (
+                            <PerformancePickCard
+                              key={`${adGroup.sourceType}:${adGroup.campaignName}:${adGroup.adGroupName ?? ""}`}
+                              title={adGroup.adGroupName || "광고세트/그룹 없음"}
+                              meta={`지출 ${formatKRW(adGroup.cost)} · 전환 ${formatNumber(adGroup.conversions)}`}
+                              active={selectedAdGroupName === adGroup.adGroupName}
+                              onClick={() => selectAdGroup(selectedAdGroupName === adGroup.adGroupName ? null : adGroup.adGroupName ?? null)}
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex gap-2 overflow-x-auto px-0.5 py-1.5">
+                          {data.adGroupSummary.map((adGroup) => (
+                            <PerformancePickCard
+                              key={`${adGroup.sourceType}:${adGroup.campaignName}:${adGroup.adGroupName ?? ""}`}
+                              title={adGroup.adGroupName || "광고세트/그룹 없음"}
+                              meta={`지출 ${formatKRW(adGroup.cost)} · 전환 ${formatNumber(adGroup.conversions)}`}
+                              active={selectedAdGroupName === adGroup.adGroupName}
+                              onClick={() => selectAdGroup(selectedAdGroupName === adGroup.adGroupName ? null : adGroup.adGroupName ?? null)}
+                            />
+                          ))}
+                          {data.adGroupSummary.length === 0 && (
+                            <CompactEmpty label="이 캠페인에서 광고세트/광고그룹 데이터를 찾지 못했어요." />
+                          )}
+                        </div>
+                      )}
                     </div>
                   </motion.div>
                 )}
@@ -782,7 +983,13 @@ export default function AnalyticsPage() {
                   ))}
                 </div>
               </div>
-              <div className={activeSourceTypes.length > 0 ? "h-72" : "h-64"}>
+              <div className={`relative ${activeSourceTypes.length > 0 ? "h-72" : "h-64"}`}>
+                {chartRows.length === 0 && (
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 text-muted-foreground">
+                    <BarChart3 className="h-8 w-8 opacity-25" />
+                    <p className="text-sm">선택한 기간·매체에 데이터가 없어요</p>
+                  </div>
+                )}
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={chartRows}>
                     <defs>
@@ -792,7 +999,18 @@ export default function AnalyticsPage() {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="date" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                      tickFormatter={(date: string) => {
+                        if (/^\d{4}-\d{2}$/.test(date)) return date.slice(2).replace("-", ".");
+                        if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+                          const [, mm, dd] = date.split("-");
+                          return `${Number(mm)}/${Number(dd)}`;
+                        }
+                        return date;
+                      }}
+                    />
                     <YAxis
                       tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
                       tickFormatter={(value) => formatMetricValue(chartMetric, Number(value))}
@@ -801,12 +1019,12 @@ export default function AnalyticsPage() {
                     <Tooltip
                       formatter={(value, name) => [
                         formatMetricValue(chartMetric, Number(value ?? 0)),
-                        name === "value" ? "전체" : (SOURCE_LABELS[String(name)] ?? String(name)),
+                        name === "value" ? "전체" : name === "prevValue" ? "이전 기간" : (SOURCE_LABELS[String(name)] ?? String(name)),
                       ]}
                     />
-                    {activeSourceTypes.length > 0 && (
+                    {(activeSourceTypes.length > 0 || previousChartRows.length > 0) && (
                       <Legend
-                        formatter={(value) => SOURCE_LABELS[value] ?? value}
+                        formatter={(value) => value === "prevValue" ? "이전 기간" : (SOURCE_LABELS[value] ?? value)}
                         wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
                       />
                     )}
@@ -820,6 +1038,19 @@ export default function AnalyticsPage() {
                       name="value"
                       legendType="none"
                     />
+                    {previousChartRows.length > 0 && (
+                      <Line
+                        type="monotone"
+                        dataKey="prevValue"
+                        stroke="#94a3b8"
+                        strokeWidth={1.5}
+                        strokeDasharray="4 3"
+                        dot={false}
+                        name="prevValue"
+                        legendType="line"
+                        connectNulls
+                      />
+                    )}
                     {activeSourceTypes.map((src) => (
                       <Line
                         key={src}
@@ -832,6 +1063,94 @@ export default function AnalyticsPage() {
                         connectNulls
                       />
                     ))}
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </motion.section>
+
+            {/* ⑬ Second chart */}
+            <motion.section
+              whileHover={{ borderColor: "rgba(16, 185, 129, 0.18)" }}
+              transition={spring}
+              className="rounded-2xl border border-border bg-background p-5"
+            >
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold">보조 지표 추이</h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{currentScopeLabel} 기준 보조 지표 흐름</p>
+                </div>
+                <div className="flex flex-wrap gap-1 rounded-xl border border-border bg-secondary/30 p-1">
+                  {CHART_METRICS.map((metric) => (
+                    <motion.button
+                      key={metric.value}
+                      onClick={() => setSecondChartMetric(metric.value)}
+                      whileHover={{ y: -1 }}
+                      whileTap={{ scale: 0.96 }}
+                      transition={spring}
+                      className={`relative rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                        secondChartMetric === metric.value
+                          ? "text-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {secondChartMetric === metric.value && (
+                        <motion.div
+                          layoutId="ad-second-chart-metric-bg"
+                          className="absolute inset-0 rounded-lg bg-background shadow-sm"
+                          transition={spring}
+                          style={{ zIndex: 0 }}
+                        />
+                      )}
+                      <span className="relative z-10">{metric.label}</span>
+                    </motion.button>
+                  ))}
+                </div>
+              </div>
+              <div className="relative h-56">
+                {secondChartRows.length === 0 && (
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 text-muted-foreground">
+                    <BarChart3 className="h-8 w-8 opacity-25" />
+                    <p className="text-sm">선택한 기간·매체에 데이터가 없어요</p>
+                  </div>
+                )}
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={secondChartRows}>
+                    <defs>
+                      <linearGradient id="adSecondFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.28} />
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0.02} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                      tickFormatter={(date: string) => {
+                        if (/^\d{4}-\d{2}$/.test(date)) return date.slice(2).replace("-", ".");
+                        if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+                          const [, mm, dd] = date.split("-");
+                          return `${Number(mm)}/${Number(dd)}`;
+                        }
+                        return date;
+                      }}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                      tickFormatter={(value) => formatMetricValue(secondChartMetric, Number(value))}
+                      width={82}
+                    />
+                    <Tooltip
+                      formatter={(value) => [formatMetricValue(secondChartMetric, Number(value ?? 0)), CHART_METRICS.find((m) => m.value === secondChartMetric)?.label ?? secondChartMetric]}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="value"
+                      stroke="#10b981"
+                      strokeWidth={2}
+                      fill="url(#adSecondFill)"
+                      name="value"
+                      legendType="none"
+                    />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
@@ -851,12 +1170,53 @@ export default function AnalyticsPage() {
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    <motion.button
+                      type="button"
+                      onClick={() => {
+                        const headers = ["일자", "매체", "캠페인", "광고세트/그룹", "지출", "CPM", "CPC", "CTR", "CVR", "전환수", "결과당 비용"];
+                        const rows = detailRows.map((row) => {
+                          const cost = row.cost ?? 0;
+                          const impressions = row.impressions ?? 0;
+                          const clicks = row.clicks ?? 0;
+                          const conversions = row.conversions ?? 0;
+                          return [
+                            formatDetailPeriod(row.periodKey ?? row.reportDate ?? row.reportStart, detailDateGranularity),
+                            SOURCE_LABELS[row.sourceType] ?? row.sourceType,
+                            row.campaignName,
+                            row.adGroupName || "",
+                            Math.round(cost),
+                            Math.round(row.cpm ?? getChartMetricValue({ cost, impressions, clicks, conversions }, "cpm")),
+                            Math.round(row.cpc ?? getChartMetricValue({ cost, impressions, clicks, conversions }, "cpc")),
+                            (row.ctr ?? calcCtr(clicks, impressions)).toFixed(2) + "%",
+                            (row.cvr ?? row.conversionRate ?? calcCvr(conversions, clicks)).toFixed(2) + "%",
+                            Math.round(conversions),
+                            Math.round(row.costPerConversion ?? calcCostPerResult(cost, conversions)),
+                          ].join(",");
+                        });
+                        const csvContent = "﻿" + [headers.join(","), ...rows].join("\n");
+                        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = `ad-performance-${todayInputValue(0)}.csv`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                      whileHover={{ y: -1 }}
+                      whileTap={{ scale: 0.96 }}
+                      transition={spring}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-border bg-background px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      CSV 내보내기
+                    </motion.button>
                     <motion.div
                       whileHover={{ y: detailPeriodOptions.length ? -1 : 0 }}
                       transition={spring}
                       className="flex h-9 items-center gap-2 rounded-xl border border-border bg-background px-2.5"
+                      title="선택한 단위(일/주/월) 안의 특정 기간"
                     >
-                      <span className="text-xs font-medium text-muted-foreground">기간</span>
+                      <span className="text-xs font-medium text-muted-foreground">일자 기준</span>
                       <select
                         value={selectedDetailPeriod}
                         onChange={(event) => changeDetailPeriod(event.target.value)}
@@ -864,7 +1224,7 @@ export default function AnalyticsPage() {
                         className="h-7 min-w-32 bg-transparent text-xs font-medium outline-none disabled:cursor-not-allowed disabled:text-muted-foreground"
                       >
                         {detailPeriodOptions.length === 0 ? (
-                          <option value="">기간 없음</option>
+                          <option value="">데이터 없음</option>
                         ) : (
                           detailPeriodOptions.map((period) => (
                             <option key={period.value} value={period.value}>
@@ -935,17 +1295,41 @@ export default function AnalyticsPage() {
                 <table className="w-full min-w-[1060px] text-sm">
                   <thead className="bg-secondary/40 text-xs text-muted-foreground">
                     <tr>
-                      <th className="px-4 py-3 text-left font-medium">{detailDateHeader}</th>
-                      <th className="px-4 py-3 text-left font-medium">매체</th>
-                      <th className="px-4 py-3 text-left font-medium">캠페인</th>
-                      <th className="px-4 py-3 text-left font-medium">광고세트/그룹</th>
-                      <th className="px-4 py-3 text-right font-medium">지출</th>
-                      <th className="px-4 py-3 text-right font-medium">CPM</th>
-                      <th className="px-4 py-3 text-right font-medium">CPC</th>
-                      <th className="px-4 py-3 text-right font-medium">CTR</th>
-                      <th className="px-4 py-3 text-right font-medium">CVR</th>
-                      <th className="px-4 py-3 text-right font-medium">전환수</th>
-                      <th className="px-4 py-3 text-right font-medium">결과당 비용</th>
+                      {(
+                        [
+                          { key: "periodKey", label: detailDateHeader, align: "left" },
+                          { key: "sourceType", label: "매체", align: "left" },
+                          { key: "campaignName", label: "캠페인", align: "left" },
+                          { key: "adGroupName", label: "광고세트/그룹", align: "left" },
+                          { key: "cost", label: "지출", align: "right" },
+                          { key: "cpm", label: "CPM", align: "right" },
+                          { key: "cpc", label: "CPC", align: "right" },
+                          { key: "ctr", label: "CTR", align: "right" },
+                          { key: "cvr", label: "CVR", align: "right" },
+                          { key: "conversions", label: "전환수", align: "right" },
+                          { key: "costPerConversion", label: "결과당 비용", align: "right" },
+                        ] as Array<{ key: string; label: string; align: "left" | "right" }>
+                      ).map(({ key, label, align }) => (
+                        <th
+                          key={key}
+                          onClick={() => handleDetailSort(key)}
+                          className={`cursor-pointer select-none px-4 py-3 font-medium hover:text-foreground ${align === "right" ? "text-right" : "text-left"}`}
+                        >
+                          <span className="inline-flex items-center gap-1">
+                            {align === "right" && (
+                              detailSortCol === key
+                                ? detailSortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                                : <ArrowUpDown className="h-3 w-3 opacity-30" />
+                            )}
+                            {label}
+                            {align === "left" && (
+                              detailSortCol === key
+                                ? detailSortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                                : <ArrowUpDown className="h-3 w-3 opacity-30" />
+                            )}
+                          </span>
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
@@ -1064,7 +1448,7 @@ export default function AnalyticsPage() {
           <ImportHistoryPanel
             batches={data.batches}
             onClose={() => setHistoryOpen(false)}
-            onDelete={(id) => deleteBatch(id, fetchData)}
+            onDelete={(id) => deleteBatchRequest(id, fetchData)}
           />
         )}
       </AnimatePresence>
@@ -1072,7 +1456,29 @@ export default function AnalyticsPage() {
   );
 }
 
-function MetricCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function MetricCard({
+  label,
+  value,
+  sub,
+  currentRaw,
+  previousRaw,
+  lowerIsBetter,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  currentRaw?: number;
+  previousRaw?: number;
+  lowerIsBetter?: boolean;
+}) {
+  const badge = useMemo(() => {
+    if (currentRaw == null || previousRaw == null || previousRaw === 0) return null;
+    const pct = ((currentRaw - previousRaw) / Math.abs(previousRaw)) * 100;
+    if (Math.abs(pct) < 0.5) return null;
+    const improved = lowerIsBetter ? pct < 0 : pct > 0;
+    return { pct, improved };
+  }, [currentRaw, previousRaw, lowerIsBetter]);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -1082,7 +1488,28 @@ function MetricCard({ label, value, sub }: { label: string; value: string; sub?:
       className="rounded-2xl border border-border bg-background p-4"
     >
       <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <p className="mt-2 truncate text-xl font-semibold">{value}</p>
+      <div className="mt-2 flex items-end gap-2">
+        <p className="truncate text-xl font-semibold">{value}</p>
+        {badge && (
+          <motion.span
+            initial={{ opacity: 0, scale: 0.85 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={spring}
+            className={`mb-0.5 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${
+              badge.improved
+                ? "bg-emerald-500/12 text-emerald-600"
+                : "bg-red-500/12 text-red-500"
+            }`}
+          >
+            {badge.improved ? (
+              <TrendingUp className="h-3 w-3" />
+            ) : (
+              <TrendingDown className="h-3 w-3" />
+            )}
+            {badge.pct > 0 ? "+" : ""}{badge.pct.toFixed(1)}%
+          </motion.span>
+        )}
+      </div>
       {sub && <p className="mt-1 text-xs text-muted-foreground">{sub}</p>}
     </motion.div>
   );
@@ -1158,46 +1585,55 @@ function MediaPerformanceCard({
   conversions: number;
   onClick: () => void;
 }) {
+  const isEmpty = sourceType !== "ALL" && cost === 0 && impressions === 0 && clicks === 0 && conversions === 0;
+
   return (
     <motion.button
       type="button"
-      onClick={onClick}
+      onClick={isEmpty ? undefined : onClick}
       layout
-      whileHover={{ scale: 1.012, boxShadow: "0 8px 22px rgba(15, 23, 42, 0.08)" }}
-      whileTap={{ scale: 0.97 }}
+      whileHover={isEmpty ? undefined : { scale: 1.012, boxShadow: "0 8px 22px rgba(15, 23, 42, 0.08)" }}
+      whileTap={isEmpty ? undefined : { scale: 0.97 }}
       transition={spring}
       className={`min-w-[210px] rounded-xl border px-3 py-2.5 text-left transition-colors ${
-        active
-          ? "border-violet-400 bg-violet-500/10"
-          : "border-border bg-background hover:border-violet-300/60 hover:bg-secondary/40"
+        isEmpty
+          ? "cursor-not-allowed opacity-40 border-border bg-background"
+          : active
+            ? "border-violet-400 bg-violet-500/10"
+            : "border-border bg-background hover:border-violet-300/60 hover:bg-secondary/40"
       }`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-sm font-semibold">{SOURCE_LABELS[sourceType] ?? sourceType}</p>
-          <p className="mt-1 truncate text-xs text-muted-foreground">지출 {formatKRW(cost)}</p>
+          <p className="mt-1 truncate text-xs text-muted-foreground">
+            {isEmpty ? "데이터 없음" : `지출 ${formatKRW(cost)}`}
+          </p>
         </div>
-        <motion.span layout className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-          active ? "bg-violet-500 text-white" : "bg-secondary text-muted-foreground"
-        }`}>
-          {active ? "선택" : "보기"}
-        </motion.span>
+        {!isEmpty && (
+          <motion.span layout className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+            active ? "bg-violet-500 text-white" : "bg-secondary text-muted-foreground"
+          }`}>
+            {active ? "선택" : "보기"}
+          </motion.span>
+        )}
       </div>
-      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-        <span>전환 {formatNumber(conversions)}</span>
-        <span>CTR {formatPct(calcCtr(clicks, impressions))}</span>
-      </div>
+      {!isEmpty && (
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+          <span>전환 {formatNumber(conversions)}</span>
+          <span>CTR {formatPct(calcCtr(clicks, impressions))}</span>
+        </div>
+      )}
     </motion.button>
   );
 }
 
-async function deleteBatch(id: string, onDone: () => Promise<void>) {
-  if (!confirm("이 소스 이력과 성과 데이터를 삭제할까요?")) return;
+async function deleteBatchRequest(id: string, onDone: () => Promise<void>) {
   const res = await fetch(`/api/ad-performance/batches/${id}`, { method: "DELETE" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     toast.error(data.error ?? "삭제하지 못했어요");
-    return;
+    throw new Error(data.error ?? "삭제하지 못했어요");
   }
   toast.success("소스 이력이 삭제됐어요");
   await onDone();
@@ -1212,6 +1648,26 @@ function ImportHistoryPanel({
   onClose: () => void;
   onDelete: (id: string) => Promise<void>;
 }) {
+  const [localBatches, setLocalBatches] = useState(batches);
+  const [deleteBatchId, setDeleteBatchId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const confirmDelete = async () => {
+    if (!deleteBatchId) return;
+    // Optimistically remove from local list
+    setLocalBatches((prev) => prev.filter((b) => b.id !== deleteBatchId));
+    setDeleteBatchId(null);
+    setDeleting(true);
+    try {
+      await onDelete(deleteBatchId);
+    } catch {
+      // Restore on failure
+      setLocalBatches(batches);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <>
       <motion.div
@@ -1245,14 +1701,14 @@ function ImportHistoryPanel({
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
-          {batches.length === 0 ? (
+          {localBatches.length === 0 ? (
             <div className="flex h-64 flex-col items-center justify-center text-center">
               <Database className="mb-3 h-9 w-9 text-muted-foreground/30" />
               <p className="text-sm text-muted-foreground">아직 추가된 소스 이력이 없어요</p>
             </div>
           ) : (
             <div className="space-y-2">
-              {batches.map((batch) => (
+              {localBatches.map((batch) => (
                 <motion.div
                   key={batch.id}
                   initial={{ opacity: 0, x: 12 }}
@@ -1275,11 +1731,12 @@ function ImportHistoryPanel({
                       </p>
                     </div>
                     <motion.button
-                      onClick={() => void onDelete(batch.id)}
+                      onClick={() => setDeleteBatchId(batch.id)}
                       whileHover={{ scale: 1.06 }}
                       whileTap={{ scale: 0.94 }}
                       transition={spring}
-                      className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-500"
+                      disabled={deleting}
+                      className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-500 disabled:opacity-40"
                       aria-label="소스 이력 삭제"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -1291,6 +1748,58 @@ function ImportHistoryPanel({
           )}
         </div>
       </motion.aside>
+
+      {/* Delete confirmation modal */}
+      <AnimatePresence>
+        {deleteBatchId && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[60] bg-black/50"
+              onClick={() => setDeleteBatchId(null)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 8 }}
+              transition={spring}
+              className="fixed left-1/2 top-1/2 z-[70] w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-background p-6 shadow-2xl"
+            >
+              <div className="mb-1 flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-red-500/10">
+                  <Trash2 className="h-4 w-4 text-red-500" />
+                </div>
+                <h3 className="text-base font-semibold">소스 이력 삭제</h3>
+              </div>
+              <p className="mt-3 text-sm text-muted-foreground">
+                이 소스 이력과 연결된 모든 성과 데이터가 삭제됩니다. 이 작업은 되돌릴 수 없어요.
+              </p>
+              <div className="mt-5 flex justify-end gap-2">
+                <motion.button
+                  onClick={() => setDeleteBatchId(null)}
+                  whileHover={{ y: -1 }}
+                  whileTap={{ scale: 0.97 }}
+                  transition={spring}
+                  className="rounded-xl border border-border px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary"
+                >
+                  취소
+                </motion.button>
+                <motion.button
+                  onClick={confirmDelete}
+                  whileHover={{ y: -1 }}
+                  whileTap={{ scale: 0.97 }}
+                  transition={spring}
+                  className="rounded-xl bg-red-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-600"
+                >
+                  삭제
+                </motion.button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </>
   );
 }

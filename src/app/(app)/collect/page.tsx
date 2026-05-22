@@ -283,48 +283,47 @@ export default function CollectPage() {
                 <Database className="w-4 h-4" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  {editingId === source.id ? (
-                    <div className="flex items-center gap-1.5 flex-1 min-w-0" onClick={(e) => e.preventDefault()}>
-                      <input
-                        autoFocus
-                        value={editingName}
-                        onChange={(e) => setEditingName(e.target.value)}
-                        onBlur={() => handleRenameSource(source.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") handleRenameSource(source.id);
-                          if (e.key === "Escape") setEditingId(null);
-                        }}
-                        className="text-sm font-medium bg-transparent border-b border-violet-400 focus:outline-none flex-1 min-w-0 py-0.5"
-                      />
-                      <button
-                        onMouseDown={(e) => { e.preventDefault(); handleRenameSource(source.id); }}
-                        className="p-0.5 rounded text-violet-500 hover:bg-violet-500/10 transition-colors shrink-0"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onMouseDown={(e) => { e.preventDefault(); setEditingId(null); }}
-                        className="p-0.5 rounded text-muted-foreground hover:bg-secondary transition-colors shrink-0"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ) : (
-                    <Link href={`/collect/${source.id}`} className="flex items-center gap-2 flex-1 min-w-0">
-                      <span className="text-sm font-medium truncate">{source.name}</span>
+                {/* 이름 행: 편집 아이콘을 이름 텍스트 바로 옆에 배치 */}
+                {editingId === source.id ? (
+                  <div className="flex items-center gap-1.5 min-w-0" onClick={(e) => e.preventDefault()}>
+                    <input
+                      autoFocus
+                      value={editingName}
+                      onChange={(e) => setEditingName(e.target.value)}
+                      onBlur={() => handleRenameSource(source.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleRenameSource(source.id);
+                        if (e.key === "Escape") setEditingId(null);
+                      }}
+                      className="text-sm font-medium bg-transparent border-b border-violet-400 focus:outline-none min-w-0 py-0.5"
+                    />
+                    <button
+                      onMouseDown={(e) => { e.preventDefault(); handleRenameSource(source.id); }}
+                      className="p-0.5 rounded text-violet-500 hover:bg-violet-500/10 transition-colors shrink-0"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onMouseDown={(e) => { e.preventDefault(); setEditingId(null); }}
+                      className="p-0.5 rounded text-muted-foreground hover:bg-secondary transition-colors shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1 min-w-0">
+                    <Link href={`/collect/${source.id}`} className="min-w-0">
+                      <span className="text-sm font-medium truncate block">{source.name}</span>
                     </Link>
-                  )}
-                  {editingId !== source.id && (
                     <button
                       onClick={(e) => { e.preventDefault(); setEditingId(source.id); setEditingName(source.name); }}
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-all shrink-0"
+                      className="opacity-0 group-hover:opacity-60 hover:!opacity-100 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-all shrink-0"
                       title="이름 수정"
                     >
                       <Edit3 className="w-3 h-3" />
                     </button>
-                  )}
-                </div>
+                  </div>
+                )}
                 <Link href={`/collect/${source.id}`} className="block min-w-0">
                   {source.description && (
                     <p className="text-xs text-muted-foreground truncate mt-0.5">{source.description}</p>

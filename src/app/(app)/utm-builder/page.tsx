@@ -35,6 +35,7 @@ const BASIC_MEDIUMS = [
 
 const DRAFT_KEY = "mach-utm-draft";
 const LEGACY_DRAFT_KEY = "x" + "flow-utm-draft";
+const drawerSpring = { type: "spring", stiffness: 420, damping: 30 } as const;
 type BuilderMode = "basic" | "advanced";
 type CampaignEntryMode = "select" | "custom";
 
@@ -947,10 +948,10 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
       {open && (
         <>
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40" onClick={handleClose} />
+            className="fixed inset-0 bg-black/40 z-40" onClick={handleClose} />
           <motion.aside
-            initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
-            transition={{ type: "spring", damping: 28, stiffness: 300 }}
+            initial={{ x: 36, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 36, opacity: 0 }}
+            transition={drawerSpring}
             className="fixed right-0 top-0 h-screen w-[480px] bg-background border-l border-border z-50 flex flex-col shadow-2xl">
 
             {/* 헤더 */}

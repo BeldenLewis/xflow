@@ -130,8 +130,18 @@ export const SignInPage: React.FC<SignInPageProps> = ({
 
       {/* Right column: smokey WebGL background + testimonials */}
       <section className="hidden md:block flex-1 relative p-4">
-        <div className="animate-slide-right animate-delay-300 absolute inset-4 rounded-3xl overflow-hidden">
-          <SmokeyBackground color="#1E40AF" backdropBlurAmount="none" className="rounded-3xl" />
+        <div className="animate-slide-right animate-delay-300 absolute inset-4 rounded-3xl overflow-hidden bg-[radial-gradient(circle_at_28%_24%,rgba(30,64,175,0.72),transparent_34%),linear-gradient(145deg,#07111f,#0f172a_54%,#020617)]">
+          {heroImageSrc ? (
+            <>
+              <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${heroImageSrc})` }} />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+            </>
+          ) : (
+            <>
+              <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.10),transparent_28%,rgba(255,255,255,0.06))]" />
+              <SmokeyBackground color="#1E40AF" backdropBlurAmount="none" className="rounded-3xl" />
+            </>
+          )}
         </div>
         {testimonials.length > 0 && (
           <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex gap-4 px-8 w-full justify-center">

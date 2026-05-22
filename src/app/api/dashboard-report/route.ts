@@ -316,12 +316,16 @@ function pickValue(data: Prisma.JsonValue, candidates: readonly string[], fieldA
   return [];
 }
 
-function topEntries(counts: Map<string, number>, limit: number, total?: number) {
-  const denominator = total ?? Array.from(counts.values()).reduce((sum, count) => sum + count, 0);
+function topEntriesBySectionMax(counts: Map<string, number>, limit: number) {
+  const max = Math.max(0, ...Array.from(counts.values()));
   return Array.from(counts.entries())
-    .map(([label, count]) => ({ label, count, percent: denominator > 0 ? (count / denominator) * 100 : 0 }))
+    .map(([label, count]) => ({ label, count, percent: max > 0 ? (count / max) * 100 : 0 }))
     .sort((a, b) => b.count - a.count)
     .slice(0, limit);
+}
+
+function cleanUtmValue(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function buildHeatmap(records: TimedRecord[]) {
@@ -474,19 +478,27 @@ export async function POST(request: Request) {
         counts.set(value, (counts.get(value) ?? 0) + 1);
       }
     }
-    const items = topEntries(counts, 5, rangeRecords.length);
+    const items = topEntriesBySectionMax(counts, 5);
     return { key: dimension.key, label: dimension.label, items, total: Array.from(counts.values()).reduce((sum, count) => sum + count, 0) };
   }).filter((section) => section.items.length > 0).slice(0, 4);
 
   const utmCols = getUtmColumns(filters);
-  const utmTotal = utmGroups.reduce((sum, group) => sum + group._count._all, 0);
-  const utmTop = utmGroups
+  const utmRows = utmGroups
+    .map((group) => {
+      const source = cleanUtmValue(group[utmCols.source]);
+      const medium = cleanUtmValue(group[utmCols.medium]);
+      const campaign = cleanUtmValue(group[utmCols.campaign]);
+      return { source, medium, campaign, count: group._count._all };
+    })
+    .filter((group) => group.source || group.medium || group.campaign);
+  const utmTotal = utmRows.reduce((sum, group) => sum + group.count, 0);
+  const utmTop = utmRows
     .map((group) => ({
-      source: group[utmCols.source] || "(없음)",
-      medium: group[utmCols.medium] || "(없음)",
-      campaign: group[utmCols.campaign] || "(없음)",
-      count: group._count._all,
-      percent: utmTotal > 0 ? (group._count._all / utmTotal) * 100 : 0,
+      source: group.source || "소스 미지정",
+      medium: group.medium || "매체 미지정",
+      campaign: group.campaign || "캠페인 미지정",
+      count: group.count,
+      percent: utmTotal > 0 ? (group.count / utmTotal) * 100 : 0,
     }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 5);

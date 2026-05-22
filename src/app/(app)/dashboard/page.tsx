@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Filter, LayoutDashboard, Loader2, RefreshCw, Sparkles, X } from "lucide-react";
+import { Filter, LayoutDashboard, Loader2, RefreshCw, X } from "lucide-react";
 import { useWorkspace } from "@/contexts/workspace";
 import { kstDateString } from "@/lib/datetime";
 import DateRangePicker, { DateRange } from "./DateRangePicker";
@@ -142,10 +142,6 @@ export default function DashboardPage() {
     <div className="space-y-4 p-8">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-violet-500/20 bg-violet-500/5 px-2.5 py-1 text-xs font-medium text-violet-600">
-            <Sparkles className="h-3.5 w-3.5" />
-            Live Report
-          </div>
           <h1 className="text-2xl font-semibold">실시간 보고서</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {currentProject.name}의 등록 흐름과 전시팀 인사이트를 요약합니다

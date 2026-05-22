@@ -197,3 +197,11 @@
 .custom-checkbox {
   @apply w-4 h-4 rounded accent-violet-500 cursor-pointer;
 }
+
+.mach-toaster {
+  pointer-events: none;
+}
+
+.mach-toaster [data-sonner-toast] {
+  pointer-events: auto;
+}

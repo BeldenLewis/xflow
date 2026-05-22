@@ -24,7 +24,12 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body className="min-h-full flex flex-col">
         {children}
         <Toaster
-          position="bottom-right"
+          position="top-center"
+          className="mach-toaster"
+          closeButton
+          visibleToasts={3}
+          offset={{ top: 18 }}
+          mobileOffset={{ top: 12 }}
           toastOptions={{
             style: { borderRadius: "14px", fontSize: "14px" },
             duration: 3000,

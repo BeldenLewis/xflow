@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Copy, Check, QrCode, Link2, Trash2, ExternalLink,
-  ChevronDown, FolderOpen, Layers, Sparkles, X, Save,
+  ChevronDown, FolderOpen, Layers, X, Save,
   RotateCcw, Search, ChevronRight, Loader2, Edit2, FileDown,
   AlertCircle, ArrowUpDown, CopyPlus, CheckCircle2, LayoutList,
 } from "lucide-react";
@@ -326,14 +326,52 @@ function SuggestionChips({ options, value, onSelect }: {
   );
 }
 
-function TemplatePicker({ templates, onSelect }: { templates: Template[]; onSelect: (t: Template) => void }) {
+function TemplatePicker({
+  templates,
+  onSelect,
+  selectedName,
+  inline = false,
+}: {
+  templates: Template[];
+  onSelect: (t: Template) => void;
+  selectedName?: string | null;
+  inline?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   if (templates.length === 0) return null;
+  const selected = selectedName ? templates.find((template) => template.name === selectedName) : null;
+  const selectedSummary = selected
+    ? `${selected.source} / ${selected.medium}${selected.campaign ? ` / ${selected.campaign}` : ""}`
+    : null;
+
   return (
-    <div className="relative">
-      <motion.button whileTap={{ scale: 0.95 }} onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-violet-400/40 bg-violet-500/5 text-xs font-medium text-violet-500 hover:bg-violet-500/10 transition-colors">
-        <Layers className="w-3.5 h-3.5" />템플릿
+    <div className="relative w-full">
+      <motion.button
+        type="button"
+        whileTap={{ scale: 0.98 }}
+        onClick={() => setOpen(!open)}
+        className={inline
+          ? "flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-secondary/30 px-3 py-2.5 text-left transition-colors hover:border-violet-400/50 hover:bg-violet-500/5"
+          : "flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-violet-400/40 bg-violet-500/5 text-xs font-medium text-violet-500 hover:bg-violet-500/10 transition-colors"
+        }
+      >
+        {inline ? (
+          <span className="min-w-0 flex items-center gap-2">
+            <Layers className="h-4 w-4 shrink-0 text-violet-500" />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-foreground">
+                {selectedName || "템플릿 선택"}
+              </span>
+              <span className="mt-0.5 block truncate font-mono text-xs text-muted-foreground">
+                {selectedSummary || "자주 쓰는 UTM 조합을 빠르게 불러와요"}
+              </span>
+            </span>
+          </span>
+        ) : (
+          <>
+            <Layers className="w-3.5 h-3.5" />템플릿
+          </>
+        )}
         <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2 }}>
           <ChevronDown className="w-3 h-3" />
         </motion.span>
@@ -344,7 +382,7 @@ function TemplatePicker({ templates, onSelect }: { templates: Template[]; onSele
             <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
             <motion.div initial={{ opacity: 0, y: -6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -6, scale: 0.97 }} transition={{ duration: 0.12 }}
-              className="absolute top-full right-0 mt-2 w-72 max-w-[calc(100vw-2rem)] bg-background border border-border rounded-2xl shadow-lg z-50 overflow-hidden">
+              className={`${inline ? "left-0 right-0 w-full" : "right-0 w-72 max-w-[calc(100vw-2rem)]"} absolute top-full mt-2 bg-background border border-border rounded-2xl shadow-lg z-50 overflow-hidden`}>
               <div className="p-1">
                 <p className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">템플릿</p>
                 {templates.map((t) => (
@@ -927,7 +965,6 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  {!isEdit && !duplicateFrom && <TemplatePicker templates={templates} onSelect={handleTemplateSelect} />}
                   <button onClick={handleClose} className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground">
                     <X className="w-4 h-4" />
                   </button>
@@ -975,19 +1012,7 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
                   <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
                     className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-400/20 text-xs text-amber-600">
                     <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                    <span>동일한 조합의 UTM이 이미 있어요. <span className="font-medium">'{getUtmRowTitle(duplicate)}'</span> — 그래도 저장할 수 있어요.</span>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* 템플릿 적용 배너 */}
-              <AnimatePresence>
-                {appliedTemplate && (
-                  <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
-                    className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-violet-500/10 border border-violet-400/20 text-xs text-violet-500">
-                    <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                    <span><span className="font-medium">'{appliedTemplate}'</span> 적용됨 — 캠페인명을 입력해주세요</span>
-                    <button onClick={() => setAppliedTemplate(null)} className="ml-auto"><X className="w-3 h-3" /></button>
+                    <span>동일한 조합의 UTM이 이미 있어요. <span className="font-medium">"{getUtmRowTitle(duplicate)}"</span> — 그래도 저장할 수 있어요.</span>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -998,6 +1023,17 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
                   <motion.div key={isEdit ? "edit" : duplicateFrom ? "dup" : "basic"}
                     initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }}
                     transition={{ duration: 0.18 }} className="space-y-6">
+
+                    {!isEdit && !duplicateFrom && mode === "basic" && templates.length > 0 && (
+                      <Field label="템플릿 선택 (선택)">
+                        <TemplatePicker
+                          templates={templates}
+                          onSelect={handleTemplateSelect}
+                          selectedName={appliedTemplate}
+                          inline
+                        />
+                      </Field>
+                    )}
 
                     <Field label="이름 (선택)">
                       <input type="text" placeholder="예: 2025 여름 구글 검색 광고" value={form.name}

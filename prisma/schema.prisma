@@ -16,16 +16,17 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships         WorkspaceMember[]
-  utmLinks            UTMLink[]
-  shortLinks          ShortLink[]
-  notifications       Notification[]
-  sentInvitations     WorkspaceInvitation[] @relation("InvitedBy")
-  receivedInvitations WorkspaceInvitation[] @relation("InvitedUser")
-  activityLogs        ActivityLog[] @relation("ActivityActor")
-  apiTokens           ApiToken[]
-  notificationPrefs   NotificationPref[]
-  projectMemberships  ProjectMember[]
+  memberships          WorkspaceMember[]
+  utmLinks             UTMLink[]
+  shortLinks           ShortLink[]
+  notifications        Notification[]
+  sentInvitations      WorkspaceInvitation[]      @relation("InvitedBy")
+  receivedInvitations  WorkspaceInvitation[]      @relation("InvitedUser")
+  activityLogs         ActivityLog[]              @relation("ActivityActor")
+  apiTokens            ApiToken[]
+  notificationPrefs    NotificationPref[]
+  projectMemberships   ProjectMember[]
+  adPerformanceImports AdPerformanceImportBatch[] @relation("AdPerformanceUploader")
 }
 
 model Workspace {
@@ -36,21 +37,23 @@ model Workspace {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  members        WorkspaceMember[]
-  projects       Project[]
-  utmLinks       UTMLink[]
-  shortLinks     ShortLink[]
-  utmPresets     UTMPreset[]
-  utmTemplates   UTMTemplate[]
-  invitations    WorkspaceInvitation[]
-  collectSources   CollectSource[]
-  collectRecords   CollectRecord[]
-  activityLogs     ActivityLog[]
-  dashboardWidgets DashboardWidget[]
-  dashboards       Dashboard[]
-  scheduledReports ScheduledReport[]
-  apiTokens        ApiToken[]
-  webinars         Webinar[]
+  members              WorkspaceMember[]
+  projects             Project[]
+  utmLinks             UTMLink[]
+  shortLinks           ShortLink[]
+  utmPresets           UTMPreset[]
+  utmTemplates         UTMTemplate[]
+  invitations          WorkspaceInvitation[]
+  collectSources       CollectSource[]
+  collectRecords       CollectRecord[]
+  activityLogs         ActivityLog[]
+  dashboardWidgets     DashboardWidget[]
+  dashboards           Dashboard[]
+  scheduledReports     ScheduledReport[]
+  apiTokens            ApiToken[]
+  webinars             Webinar[]
+  adPerformanceImports AdPerformanceImportBatch[]
+  adPerformanceRecords AdPerformanceRecord[]
 }
 
 model WorkspaceMember {
@@ -75,8 +78,8 @@ enum Role {
 model WorkspaceInvitation {
   id            String   @id @default(cuid())
   workspaceId   String
-  invitedUserId String?  // null 이면 미가입자 이메일 초대
-  invitedEmail  String?  // 이메일 기반 초대 시 사용 (가입 시 매칭)
+  invitedUserId String? // null 이면 미가입자 이메일 초대
+  invitedEmail  String? // 이메일 기반 초대 시 사용 (가입 시 매칭)
   invitedById   String
   role          Role     @default(MEMBER)
   status        String   @default("PENDING") // PENDING | ACCEPTED | DECLINED
@@ -94,7 +97,7 @@ model WorkspaceInvitation {
 model Notification {
   id        String   @id @default(cuid())
   userId    String
-  type      String   // "WORKSPACE_INVITE" | "ROLE_CHANGED" | "MEMBER_REMOVED"
+  type      String // "WORKSPACE_INVITE" | "ROLE_CHANGED" | "MEMBER_REMOVED"
   data      Json
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
@@ -111,32 +114,92 @@ model Project {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  utmLinks         UTMLink[]
-  collectSources   CollectSource[]
-  collectRecords   CollectRecord[]
-  dashboardWidgets DashboardWidget[]
-  dashboards       Dashboard[]
-  projectMembers   ProjectMember[]
-  webinars         Webinar[]
+  workspace            Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  utmLinks             UTMLink[]
+  collectSources       CollectSource[]
+  collectRecords       CollectRecord[]
+  dashboardWidgets     DashboardWidget[]
+  dashboards           Dashboard[]
+  projectMembers       ProjectMember[]
+  webinars             Webinar[]
+  adPerformanceImports AdPerformanceImportBatch[]
+  adPerformanceRecords AdPerformanceRecord[]
+}
+
+model AdPerformanceImportBatch {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  projectId    String
+  uploadedById String?
+  sourceType   String
+  sourceName   String?
+  fileName     String
+  rowCount     Int       @default(0)
+  reportStart  DateTime?
+  reportEnd    DateTime?
+  createdAt    DateTime  @default(now())
+
+  workspace  Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project    Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  uploadedBy User?                 @relation("AdPerformanceUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  records    AdPerformanceRecord[]
+
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([projectId, createdAt(sort: Desc)])
+}
+
+model AdPerformanceRecord {
+  id                String    @id @default(cuid())
+  batchId           String
+  workspaceId       String
+  projectId         String
+  sourceType        String
+  campaignName      String
+  adGroupName       String?
+  reportDate        DateTime?
+  reportStart       DateTime?
+  reportEnd         DateTime?
+  status            String?
+  currency          String?
+  cost              Float?
+  impressions       Int?
+  reach             Int?
+  clicks            Int?
+  cpm               Float?
+  cpc               Float?
+  ctr               Float?
+  conversions       Float?
+  costPerConversion Float?
+  conversionRate    Float?
+  resultType        String?
+  raw               Json
+  createdAt         DateTime  @default(now())
+
+  batch     AdPerformanceImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  workspace Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@index([projectId, reportDate])
+  @@index([projectId, campaignName])
 }
 
 model UTMPreset {
-  id          String    @id @default(cuid())
+  id          String   @id @default(cuid())
   workspaceId String
-  field       String    // "source" | "medium" | "campaign"
+  field       String // "source" | "medium" | "campaign"
   value       String
-  label       String?   // 기본 모드 드롭다운에 표시될 이름 (예: "구글" → value: "google")
-  sortOrder   Int       @default(0)
-  createdAt   DateTime  @default(now())
+  label       String? // 기본 모드 드롭다운에 표시될 이름 (예: "구글" → value: "google")
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
 
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, field, value])
 }
 
 model UTMTemplate {
-  id          String    @id @default(cuid())
+  id          String   @id @default(cuid())
   workspaceId String
   name        String
   source      String
@@ -144,21 +207,21 @@ model UTMTemplate {
   campaign    String?
   term        String?
   content     String?
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime @default(now())
 
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 model CollectSource {
-  id             String   @id @default(cuid())
-  projectId      String
-  workspaceId    String
-  name           String
-  description    String?
-  apiKey         String   @unique @default(cuid())
-  siteUrl        String?
-  successTrigger String   @default("정상적으로 접수되었습니다")
-  redirectUrl    String?
+  id               String    @id @default(cuid())
+  projectId        String
+  workspaceId      String
+  name             String
+  description      String?
+  apiKey           String    @unique @default(cuid())
+  siteUrl          String?
+  successTrigger   String    @default("정상적으로 접수되었습니다")
+  redirectUrl      String?
   isActive         Boolean   @default(true)
   discoveredFields Json?
   webhookUrl       String?
@@ -193,16 +256,16 @@ model FieldMapping {
 }
 
 model CollectRecord {
-  id          String   @id @default(cuid())
-  sourceId    String
-  projectId   String
-  workspaceId String
-  data        Json
-  utmSource   String?
-  utmMedium   String?
-  utmCampaign String?
-  utmTerm     String?
-  utmContent  String?
+  id               String    @id @default(cuid())
+  sourceId         String
+  projectId        String
+  workspaceId      String
+  data             Json
+  utmSource        String?
+  utmMedium        String?
+  utmCampaign      String?
+  utmTerm          String?
+  utmContent       String?
   // first-touch attribution (최초 유입 시점의 UTM)
   firstUtmSource   String?
   firstUtmMedium   String?
@@ -211,10 +274,10 @@ model CollectRecord {
   firstUtmContent  String?
   firstReferrer    String?
   firstSeenAt      DateTime?
-  referrer    String?
-  userAgent   String?
-  ip          String?
-  createdAt   DateTime @default(now())
+  referrer         String?
+  userAgent        String?
+  ip               String?
+  createdAt        DateTime  @default(now())
 
   source    CollectSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   project   Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -228,7 +291,7 @@ model ActivityLog {
   workspaceId String
   sourceId    String?
   userId      String?
-  action      String   // "source.created" | "source.deleted" | "key.regenerated" | "record.deleted" | "record.updated" | "records.imported" | "records.cleaned" | "records.normalized" | "records.bulk_deleted"
+  action      String // "source.created" | "source.deleted" | "key.regenerated" | "record.deleted" | "record.updated" | "records.imported" | "records.cleaned" | "records.normalized" | "records.bulk_deleted"
   meta        Json?
   createdAt   DateTime @default(now())
 
@@ -283,18 +346,18 @@ model DashboardWidget {
 }
 
 model ScheduledReport {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   dashboardId String
   workspaceId String
   name        String
-  cron        String   // 예: "0 9 * * 1" (매주 월 9시)
-  channel     String   // "slack" | "email"
-  target      String   // slack webhook URL 또는 이메일 주소
-  isActive    Boolean  @default(true)
+  cron        String // 예: "0 9 * * 1" (매주 월 9시)
+  channel     String // "slack" | "email"
+  target      String // slack webhook URL 또는 이메일 주소
+  isActive    Boolean   @default(true)
   lastRunAt   DateTime?
   nextRunAt   DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   dashboard Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -307,7 +370,7 @@ model ScheduledReport {
 // 소스 단위로 N일 지난 레코드 자동 제거
 model CollectRetentionPolicy {
   sourceId   String   @id
-  retainDays Int      // 0 = 영구 보관
+  retainDays Int // 0 = 영구 보관
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 }
@@ -316,10 +379,10 @@ model CollectRetentionPolicy {
 model ApiToken {
   id          String    @id @default(cuid())
   workspaceId String
-  userId      String    // 발급한 사용자
-  name        String    // 사용자 지정 라벨 (예: "Zapier 연동")
+  userId      String // 발급한 사용자
+  name        String // 사용자 지정 라벨 (예: "Zapier 연동")
   tokenHash   String    @unique // SHA-256 hash of token
-  prefix      String    // 토큰 앞 8자 (식별용 — 평문 토큰은 발급 직후 한 번만 표시)
+  prefix      String // 토큰 앞 8자 (식별용 — 평문 토큰은 발급 직후 한 번만 표시)
   scopes      String[]  @default([]) // ["records:read", "records:write", "dashboards:read"]
   lastUsedAt  DateTime?
   expiresAt   DateTime?
@@ -335,7 +398,7 @@ model ApiToken {
 model NotificationPref {
   id        String   @id @default(cuid())
   userId    String
-  eventType String   // "WORKSPACE_INVITE" | "COLLECT_SUBMITTED" | "REPORT_SENT" | "ROLE_CHANGED" 등
+  eventType String // "WORKSPACE_INVITE" | "COLLECT_SUBMITTED" | "REPORT_SENT" | "ROLE_CHANGED" 등
   enabled   Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -351,7 +414,7 @@ model ProjectMember {
   id        String   @id @default(cuid())
   userId    String
   projectId String
-  role      String   // "VIEWER" | "EDITOR" | "ADMIN"
+  role      String // "VIEWER" | "EDITOR" | "ADMIN"
   createdAt DateTime @default(now())
 
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -408,8 +471,8 @@ model Webinar {
   liveStartAt    DateTime
   liveEndAt      DateTime
   signupDeadline DateTime
-  theme          Json     // { accentColor, bgColor, surfaceColor, textColor, font, borderRadius, bgEffect }
-  config         Json     // { youtubeId, calendarUrl, surveyUrl, etc. }
+  theme          Json // { accentColor, bgColor, surfaceColor, textColor, font, borderRadius, bgEffect }
+  config         Json // { youtubeId, calendarUrl, surveyUrl, etc. }
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

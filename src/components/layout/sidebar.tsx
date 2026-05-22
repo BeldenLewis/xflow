@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  LayoutDashboard, Link2, BarChart3, LogOut,
+  LayoutDashboard, BarChart3, LogOut,
   ChevronDown, Plus, FolderOpen, Check, Loader2, Settings2, Settings, Database, Video,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -20,10 +20,9 @@ import NotificationPrefsModal from "@/components/settings/NotificationPrefsModal
 
 const navItems = [
   { href: "/dashboard", icon: LayoutDashboard, label: "대시보드" },
-  { href: "/utm-builder", icon: Link2, label: "UTM 빌더" },
-  { href: "/collect", icon: Database, label: "데이터 수집" },
+  { href: "/collect", icon: Database, label: "사전등록" },
+  { href: "/analytics", icon: BarChart3, label: "광고 성과" },
   { href: "/webinar", icon: Video, label: "웨비나" },
-  { href: "/analytics", icon: BarChart3, label: "마케팅 채널", soon: true },
 ];
 
 function Dropdown({
@@ -294,17 +293,16 @@ export function Sidebar() {
       {/* 네비게이션 */}
 
       <nav className="flex-1 px-3 py-1 space-y-0.5 overflow-y-auto">
-        {navItems.map(({ href, icon: Icon, label, soon }) => {
+        {navItems.map(({ href, icon: Icon, label }) => {
           const isActive = pathname === href || pathname.startsWith(href + "/");
           return (
-            <Link key={href} href={soon ? "#" : href}
+            <Link key={href} href={href}
               className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-colors ${
                 isActive ? "bg-violet-500/10 text-violet-500 font-medium" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-              } ${soon ? "cursor-not-allowed opacity-50 pointer-events-none" : ""}`}
+              }`}
             >
               <Icon className="w-4 h-4 shrink-0" />
               <span>{label}</span>
-              {soon && <span className="ml-auto text-[10px] bg-secondary text-muted-foreground px-2 py-0.5 rounded-full">준비중</span>}
             </Link>
           );
         })}

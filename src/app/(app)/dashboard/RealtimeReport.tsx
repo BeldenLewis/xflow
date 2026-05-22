@@ -326,7 +326,7 @@ export default function RealtimeReport({ data, loading, rangeLabel }: Props) {
         <section className="rounded-[24px] border border-border bg-background p-5">
           <div className="flex items-center gap-2 mb-4">
             <TrendingUp className="w-4 h-4 text-violet-500" />
-            <h3 className="text-sm font-semibold">최근 유입 UTM TOP 5</h3>
+            <h3 className="text-sm font-semibold">사전등록 UTM TOP 5</h3>
           </div>
           {data.utmTop.length > 0 ? (
             <div className="space-y-2">

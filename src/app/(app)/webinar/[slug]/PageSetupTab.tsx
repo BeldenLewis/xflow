@@ -1,6 +1,7 @@
 "use client";
 
 import { type ElementType } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Code2, FileText, ListChecks, Palette, SlidersHorizontal } from "lucide-react";
 import SettingsTab from "./SettingsTab";
 import RegistrationFormTab from "./RegistrationFormTab";
@@ -70,17 +71,26 @@ export default function PageSetupTab({
             const active = item.id === section;
 
             return (
-              <button
+              <motion.button
                 key={item.id}
                 type="button"
                 onClick={() => onSectionChange(item.id)}
-                className={`flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
-                  active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:bg-background/70 hover:text-foreground"
+                whileTap={{ scale: 0.98 }}
+                className={`relative flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
+                  active ? "text-foreground" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <Icon className="h-4 w-4 shrink-0" />
-                <span>{item.label}</span>
-              </button>
+                {active && (
+                  <motion.div
+                    layoutId="page-setup-section-bg"
+                    className="absolute inset-0 rounded-xl bg-background shadow-sm"
+                    transition={{ type: "spring", stiffness: 420, damping: 30 }}
+                    style={{ zIndex: 0 }}
+                  />
+                )}
+                <Icon className="relative z-10 h-4 w-4 shrink-0" />
+                <span className="relative z-10">{item.label}</span>
+              </motion.button>
             );
           })}
         </nav>
@@ -88,35 +98,56 @@ export default function PageSetupTab({
 
       <div className="min-w-0 min-h-0 flex flex-col overflow-hidden">
         <div className="shrink-0 border-b border-border px-8 py-5">
-          <div className="flex items-center gap-2">
-            <ActiveIcon className="h-4 w-4 text-violet-500" />
-            <h2 className="text-sm font-semibold">{activeMeta.label}</h2>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">{activeMeta.desc}</p>
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={section}
+              initial={{ opacity: 0, x: 10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -10 }}
+              transition={{ duration: 0.18 }}
+            >
+              <div className="flex items-center gap-2">
+                <ActiveIcon className="h-4 w-4 text-violet-500" />
+                <h2 className="text-sm font-semibold">{activeMeta.label}</h2>
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">{activeMeta.desc}</p>
+            </motion.div>
+          </AnimatePresence>
         </div>
 
         <div className="min-h-0 flex-1 overflow-hidden">
-          {section === "general" && (
-            <div className="h-full overflow-auto">
-              <SettingsTab webinar={webinar} onUpdate={onUpdate} />
-            </div>
-          )}
-        {section === "form" && (
-          <div className="h-full overflow-auto">
-            <RegistrationFormTab webinar={webinar} onUpdate={onUpdate} />
-          </div>
-        )}
-        {section === "sessions" && (
-          <div className="h-full overflow-auto">
-            <SessionsTab webinarId={webinar.id} sessions={webinar.sessions} onUpdate={onUpdate} />
-          </div>
-        )}
-        {section === "theme" && (
-          <div className="h-full overflow-auto">
-            <ThemeTab webinar={webinar} onUpdate={onUpdate} />
-          </div>
-        )}
-        {section === "embed" && <EmbedTab webinar={webinar} />}
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={section}
+              initial={{ opacity: 0, x: 12 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -12 }}
+              transition={{ duration: 0.18 }}
+              className="h-full"
+            >
+              {section === "general" && (
+                <div className="h-full overflow-auto">
+                  <SettingsTab webinar={webinar} onUpdate={onUpdate} />
+                </div>
+              )}
+              {section === "form" && (
+                <div className="h-full overflow-auto">
+                  <RegistrationFormTab webinar={webinar} onUpdate={onUpdate} />
+                </div>
+              )}
+              {section === "sessions" && (
+                <div className="h-full overflow-auto">
+                  <SessionsTab webinarId={webinar.id} sessions={webinar.sessions} onUpdate={onUpdate} />
+                </div>
+              )}
+              {section === "theme" && (
+                <div className="h-full overflow-auto">
+                  <ThemeTab webinar={webinar} onUpdate={onUpdate} />
+                </div>
+              )}
+              {section === "embed" && <EmbedTab webinar={webinar} />}
+            </motion.div>
+          </AnimatePresence>
         </div>
       </div>
     </div>

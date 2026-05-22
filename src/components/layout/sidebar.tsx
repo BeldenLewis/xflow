@@ -6,7 +6,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, BarChart3, LogOut,
-  ChevronDown, Plus, FolderOpen, Check, Loader2, Settings2, Settings, Database, Video, Link2, Pencil,
+  ChevronDown, Plus, FolderOpen, Check, Loader2, Settings2, Settings, Database, Video, Link2, Pencil, ShieldCheck,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useWorkspace } from "@/contexts/workspace";
@@ -18,6 +18,7 @@ import WhatsNewPanel from "@/components/WhatsNewPanel";
 import ApiTokensModal from "@/components/settings/ApiTokensModal";
 import NotificationPrefsModal from "@/components/settings/NotificationPrefsModal";
 import { ApiTokenIcon, NotificationSettingsIcon } from "@/components/settings/settings-icons";
+import { isSuperAdminEmail } from "@/lib/super-admin";
 
 const navItems = [
   { href: "/dashboard", icon: LayoutDashboard, label: "대시보드" },
@@ -94,6 +95,7 @@ export function Sidebar() {
 
   const displayName = userName || userEmail;
   const initial = displayName?.[0]?.toUpperCase() ?? "?";
+  const isSuperAdmin = isSuperAdminEmail(userEmail);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -410,10 +412,25 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* 알림 + What's new */}
-      <div className="px-3 pb-2 flex items-center gap-1">
-        <NotificationPanel />
-        <WhatsNewPanel />
+      {/* 슈퍼어드민 + 알림 + What's new */}
+      <div className="px-3 pb-2 space-y-1">
+        {isSuperAdmin && (
+          <Link
+            href="/admin"
+            className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition-colors ${
+              pathname === "/admin"
+                ? "bg-violet-500/10 text-violet-500 font-medium"
+                : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4" />
+            관리자
+          </Link>
+        )}
+        <div className="flex items-center gap-1">
+          <NotificationPanel />
+          <WhatsNewPanel />
+        </div>
       </div>
 
       {/* 하단 프로필 */}

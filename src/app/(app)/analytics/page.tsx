@@ -26,14 +26,17 @@ import {
 import { toast } from "sonner";
 import {
   Area,
-  ComposedChart,
   CartesianGrid,
+  ComposedChart,
   Legend,
   Line,
   ResponsiveContainer,
+  Scatter,
+  ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
+  ZAxis,
 } from "recharts";
 import { useWorkspace } from "@/contexts/workspace";
 import {
@@ -298,7 +301,8 @@ export default function AnalyticsPage() {
   const [selectedCampaignName, setSelectedCampaignName] = useState<string | null>(null);
   const [selectedAdGroupName, setSelectedAdGroupName] = useState<string | null>(null);
   const [chartMetric, setChartMetric] = useState<ChartMetric>("cost");
-  const [secondChartMetric, setSecondChartMetric] = useState<ChartMetric>("conversions");
+  const [dualMetricA, setDualMetricA] = useState<ChartMetric>("cost");
+  const [dualMetricB, setDualMetricB] = useState<ChartMetric>("conversions");
   const [detailGroupBy, setDetailGroupBy] = useState<DetailGroupBy>("campaign");
   const [detailDateGranularity, setDetailDateGranularity] = useState<DetailDateGranularity>("day");
   const [detailPeriod, setDetailPeriod] = useState<string | null>(null);
@@ -512,12 +516,40 @@ export default function AnalyticsPage() {
     });
   }, [data, chartMetric, previousChartRows]);
 
-  const secondChartRows = useMemo(() => {
+  const dualChartRows = useMemo(() => {
     return (data?.dailyTrend ?? []).map((row) => ({
       ...row,
-      value: getChartMetricValue(row, secondChartMetric),
+      valueA: getChartMetricValue(row, dualMetricA),
+      valueB: getChartMetricValue(row, dualMetricB),
     }));
-  }, [data, secondChartMetric]);
+  }, [data, dualMetricA, dualMetricB]);
+
+  const heatmapData = useMemo(() => {
+    const DAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
+    const byCellKey = new Map<string, { cost: number; impressions: number; clicks: number; conversions: number; count: number }>();
+    (data?.dailyTrend ?? []).forEach((row) => {
+      const d = new Date(row.date);
+      if (isNaN(d.getTime())) return;
+      const week = Math.floor((data!.dailyTrend.indexOf(row)) / 7);
+      const dayIdx = d.getDay();
+      const key = `${week}-${dayIdx}`;
+      const existing = byCellKey.get(key) ?? { cost: 0, impressions: 0, clicks: 0, conversions: 0, count: 0 };
+      byCellKey.set(key, {
+        cost: existing.cost + (row.cost ?? 0),
+        impressions: existing.impressions + (row.impressions ?? 0),
+        clicks: existing.clicks + (row.clicks ?? 0),
+        conversions: existing.conversions + (row.conversions ?? 0),
+        count: existing.count + 1,
+      });
+    });
+    const cells: Array<{ date: string; dayIdx: number; dayLabel: string; cost: number; impressions: number; clicks: number; conversions: number }> = [];
+    (data?.dailyTrend ?? []).forEach((row) => {
+      const d = new Date(row.date);
+      if (isNaN(d.getTime())) return;
+      cells.push({ date: row.date, dayIdx: d.getDay(), dayLabel: DAY_LABELS[d.getDay()], cost: row.cost ?? 0, impressions: row.impressions ?? 0, clicks: row.clicks ?? 0, conversions: row.conversions ?? 0 });
+    });
+    return cells;
+  }, [data]);
 
   const activeSourceTypes = useMemo(() => {
     if (sourceFilter !== "ALL") return [];
@@ -1068,57 +1100,77 @@ export default function AnalyticsPage() {
               </div>
             </motion.section>
 
-            {/* ⑬ Second chart */}
+            {/* ⑬ Dual-metric overlay chart */}
             <motion.section
               whileHover={{ borderColor: "rgba(16, 185, 129, 0.18)" }}
               transition={spring}
               className="rounded-2xl border border-border bg-background p-5"
             >
-              <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-semibold">보조 지표 추이</h2>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{currentScopeLabel} 기준 보조 지표 흐름</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{currentScopeLabel} 기준 두 지표 동시 비교</p>
                 </div>
-                <div className="flex flex-wrap gap-1 rounded-xl border border-border bg-secondary/30 p-1">
-                  {CHART_METRICS.map((metric) => (
-                    <motion.button
-                      key={metric.value}
-                      onClick={() => setSecondChartMetric(metric.value)}
-                      whileHover={{ y: -1 }}
-                      whileTap={{ scale: 0.96 }}
-                      transition={spring}
-                      className={`relative rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                        secondChartMetric === metric.value
-                          ? "text-foreground"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {secondChartMetric === metric.value && (
-                        <motion.div
-                          layoutId="ad-second-chart-metric-bg"
-                          className="absolute inset-0 rounded-lg bg-background shadow-sm"
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="inline-block h-2 w-2 rounded-full bg-[#8b5cf6]" />
+                    <div className="flex flex-wrap gap-1 rounded-xl border border-border bg-secondary/30 p-1">
+                      {CHART_METRICS.map((metric) => (
+                        <motion.button
+                          key={metric.value}
+                          onClick={() => setDualMetricA(metric.value)}
+                          whileHover={{ y: -1 }}
+                          whileTap={{ scale: 0.96 }}
                           transition={spring}
-                          style={{ zIndex: 0 }}
-                        />
-                      )}
-                      <span className="relative z-10">{metric.label}</span>
-                    </motion.button>
-                  ))}
+                          className={`relative rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                            dualMetricA === metric.value ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          {dualMetricA === metric.value && (
+                            <motion.div layoutId="ad-dual-a-bg" className="absolute inset-0 rounded-lg bg-background shadow-sm" transition={spring} style={{ zIndex: 0 }} />
+                          )}
+                          <span className="relative z-10">{metric.label}</span>
+                        </motion.button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="inline-block h-2 w-2 rounded-full bg-[#10b981]" />
+                    <div className="flex flex-wrap gap-1 rounded-xl border border-border bg-secondary/30 p-1">
+                      {CHART_METRICS.map((metric) => (
+                        <motion.button
+                          key={metric.value}
+                          onClick={() => setDualMetricB(metric.value)}
+                          whileHover={{ y: -1 }}
+                          whileTap={{ scale: 0.96 }}
+                          transition={spring}
+                          className={`relative rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                            dualMetricB === metric.value ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          {dualMetricB === metric.value && (
+                            <motion.div layoutId="ad-dual-b-bg" className="absolute inset-0 rounded-lg bg-background shadow-sm" transition={spring} style={{ zIndex: 0 }} />
+                          )}
+                          <span className="relative z-10">{metric.label}</span>
+                        </motion.button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
               <div className="relative h-56">
-                {secondChartRows.length === 0 && (
+                {dualChartRows.length === 0 && (
                   <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 text-muted-foreground">
                     <BarChart3 className="h-8 w-8 opacity-25" />
                     <p className="text-sm">선택한 기간·매체에 데이터가 없어요</p>
                   </div>
                 )}
                 <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={secondChartRows}>
+                  <ComposedChart data={dualChartRows}>
                     <defs>
-                      <linearGradient id="adSecondFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.28} />
-                        <stop offset="95%" stopColor="#10b981" stopOpacity={0.02} />
+                      <linearGradient id="adDualFillA" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.25} />
+                        <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0.02} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -1135,26 +1187,166 @@ export default function AnalyticsPage() {
                       }}
                     />
                     <YAxis
-                      tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
-                      tickFormatter={(value) => formatMetricValue(secondChartMetric, Number(value))}
+                      yAxisId="left"
+                      tick={{ fontSize: 11, fill: "#8b5cf6" }}
+                      tickFormatter={(value) => formatMetricValue(dualMetricA, Number(value))}
                       width={82}
                     />
+                    <YAxis
+                      yAxisId="right"
+                      orientation="right"
+                      tick={{ fontSize: 11, fill: "#10b981" }}
+                      tickFormatter={(value) => formatMetricValue(dualMetricB, Number(value))}
+                      width={72}
+                    />
                     <Tooltip
-                      formatter={(value) => [formatMetricValue(secondChartMetric, Number(value ?? 0)), CHART_METRICS.find((m) => m.value === secondChartMetric)?.label ?? secondChartMetric]}
+                      formatter={(value, name) => {
+                        if (name === "valueA") return [formatMetricValue(dualMetricA, Number(value ?? 0)), CHART_METRICS.find((m) => m.value === dualMetricA)?.label ?? dualMetricA];
+                        if (name === "valueB") return [formatMetricValue(dualMetricB, Number(value ?? 0)), CHART_METRICS.find((m) => m.value === dualMetricB)?.label ?? dualMetricB];
+                        return [value, name];
+                      }}
                     />
                     <Area
+                      yAxisId="left"
                       type="monotone"
-                      dataKey="value"
+                      dataKey="valueA"
+                      stroke="#8b5cf6"
+                      strokeWidth={2}
+                      fill="url(#adDualFillA)"
+                      name="valueA"
+                      legendType="none"
+                    />
+                    <Line
+                      yAxisId="right"
+                      type="monotone"
+                      dataKey="valueB"
                       stroke="#10b981"
                       strokeWidth={2}
-                      fill="url(#adSecondFill)"
-                      name="value"
+                      dot={false}
+                      name="valueB"
                       legendType="none"
                     />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
             </motion.section>
+
+            <div className="grid grid-cols-2 gap-5">
+            {/* ③ 캠페인 효율 산포도 */}
+            <motion.section
+              whileHover={{ borderColor: "rgba(14, 165, 233, 0.18)" }}
+              transition={spring}
+              className="rounded-2xl border border-border bg-background p-5"
+            >
+              <div className="mb-4">
+                <h2 className="text-sm font-semibold">캠페인 효율 산포도</h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">지출(X) × 전환(Y) · 원 크기 = CTR</p>
+              </div>
+              {(data?.campaignSummary ?? []).length === 0 ? (
+                <div className="flex h-52 flex-col items-center justify-center gap-2 text-muted-foreground">
+                  <BarChart3 className="h-8 w-8 opacity-25" />
+                  <p className="text-sm">캠페인 데이터가 없어요</p>
+                </div>
+              ) : (
+                <div className="h-52">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ScatterChart>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis
+                        type="number"
+                        dataKey="cost"
+                        name="지출"
+                        tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                        tickFormatter={(v) => formatMetricValue("cost", Number(v))}
+                      />
+                      <YAxis
+                        type="number"
+                        dataKey="conversions"
+                        name="전환"
+                        tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                        width={52}
+                      />
+                      <ZAxis type="number" dataKey="ctr" range={[40, 400]} name="CTR" />
+                      <Tooltip
+                        cursor={{ strokeDasharray: "3 3" }}
+                        formatter={(value, name) => {
+                          if (name === "지출") return [formatMetricValue("cost", Number(value)), name];
+                          if (name === "CTR") return [`${Number(value).toFixed(2)}%`, name];
+                          return [value, name];
+                        }}
+                      />
+                      <Scatter
+                        data={(data?.campaignSummary ?? []).map((c) => ({ cost: c.cost ?? 0, conversions: c.conversions ?? 0, ctr: (c.ctr ?? 0) * 100, name: c.campaignName }))}
+                        fill="#0ea5e9"
+                        fillOpacity={0.7}
+                        name="캠페인"
+                      />
+                    </ScatterChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </motion.section>
+
+            {/* ⑤ 요일별 성과 히트맵 */}
+            <motion.section
+              whileHover={{ borderColor: "rgba(16, 185, 129, 0.18)" }}
+              transition={spring}
+              className="rounded-2xl border border-border bg-background p-5"
+            >
+              <div className="mb-4">
+                <h2 className="text-sm font-semibold">요일별 성과 히트맵</h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">날짜별 클릭수 강도 시각화</p>
+              </div>
+              {heatmapData.length === 0 ? (
+                <div className="flex h-32 flex-col items-center justify-center gap-2 text-muted-foreground">
+                  <BarChart3 className="h-8 w-8 opacity-25" />
+                  <p className="text-sm">데이터가 없어요</p>
+                </div>
+              ) : (
+                <div>
+                  <div className="mb-1.5 grid grid-cols-7 gap-1 text-center text-[10px] text-muted-foreground">
+                    {["일", "월", "화", "수", "목", "금", "토"].map((d) => (
+                      <div key={d}>{d}</div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-1">
+                    {(() => {
+                      const maxClicks = Math.max(...heatmapData.map((c) => c.clicks), 1);
+                      const firstDay = heatmapData[0] ? new Date(heatmapData[0].date).getDay() : 0;
+                      const paddedCells = [
+                        ...Array.from({ length: firstDay }, (_, i) => ({ date: `pad-${i}`, dayIdx: i, dayLabel: "", cost: 0, impressions: 0, clicks: 0, conversions: 0, isPad: true })),
+                        ...heatmapData.map((c) => ({ ...c, isPad: false })),
+                      ];
+                      return paddedCells.map((cell, i) => {
+                        if ((cell as { isPad?: boolean }).isPad) return <div key={cell.date} className="h-7 rounded-sm" />;
+                        const intensity = maxClicks > 0 ? cell.clicks / maxClicks : 0;
+                        const alpha = 0.08 + intensity * 0.85;
+                        return (
+                          <motion.div
+                            key={cell.date}
+                            title={`${cell.date}: ${cell.clicks.toLocaleString()} 클릭`}
+                            whileHover={{ scale: 1.15 }}
+                            transition={spring}
+                            className="h-7 cursor-default rounded-sm"
+                            style={{ backgroundColor: `rgba(16, 185, 129, ${alpha})` }}
+                          />
+                        );
+                      });
+                    })()}
+                  </div>
+                  <div className="mt-2 flex items-center justify-end gap-2">
+                    <span className="text-[10px] text-muted-foreground">적음</span>
+                    <div className="flex gap-0.5">
+                      {[0.08, 0.3, 0.5, 0.7, 0.93].map((a) => (
+                        <div key={a} className="h-3 w-3 rounded-sm" style={{ backgroundColor: `rgba(16, 185, 129, ${a})` }} />
+                      ))}
+                    </div>
+                    <span className="text-[10px] text-muted-foreground">많음</span>
+                  </div>
+                </div>
+              )}
+            </motion.section>
+            </div>
 
             <motion.section
               whileHover={{ borderColor: "rgba(139, 92, 246, 0.18)" }}

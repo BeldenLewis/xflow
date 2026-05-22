@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, BarChart3, LogOut,
-  ChevronDown, Plus, FolderOpen, Check, Loader2, Settings2, Settings, Database, Video, Link2,
+  ChevronDown, Plus, FolderOpen, Check, Loader2, Settings2, Settings, Database, Video, Link2, Pencil, ShieldCheck,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useWorkspace } from "@/contexts/workspace";
@@ -17,6 +17,8 @@ import { NotificationPanel } from "@/components/notifications/notification-panel
 import WhatsNewPanel from "@/components/WhatsNewPanel";
 import ApiTokensModal from "@/components/settings/ApiTokensModal";
 import NotificationPrefsModal from "@/components/settings/NotificationPrefsModal";
+import { ApiTokenIcon, NotificationSettingsIcon } from "@/components/settings/settings-icons";
+import { isSuperAdminEmail } from "@/lib/super-admin";
 
 const navItems = [
   { href: "/dashboard", icon: LayoutDashboard, label: "대시보드" },
@@ -52,7 +54,7 @@ function Dropdown({
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const {
     workspace, workspaces, projects, currentProject,
     setCurrentProject, switchWorkspace, refreshProjects, isLoading,
@@ -74,6 +76,9 @@ export function Sidebar() {
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editingProjectName, setEditingProjectName] = useState("");
+  const [isRenamingProject, setIsRenamingProject] = useState(false);
 
   const [userEmail, setUserEmail] = useState("");
   const [userName, setUserName] = useState("");
@@ -86,10 +91,11 @@ export function Sidebar() {
     fetch("/api/user/profile").then((r) => r.json()).then((d) => {
       if (d.profile?.name) setUserName(d.profile.name);
     }).catch(() => {});
-  }, []);
+  }, [supabase.auth]);
 
   const displayName = userName || userEmail;
   const initial = displayName?.[0]?.toUpperCase() ?? "?";
+  const isSuperAdmin = isSuperAdminEmail(userEmail);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -132,6 +138,42 @@ export function Sidebar() {
     } catch (err) {
       toast.error(`프로젝트를 생성하지 못했어요. ${err instanceof Error ? err.message : "다시 시도해주세요"}`);
     } finally { setIsCreatingProject(false); }
+  };
+
+  const startRenameProject = (project: { id: string; name: string }) => {
+    setShowNewProject(false);
+    setEditingProjectId(project.id);
+    setEditingProjectName(project.name);
+  };
+
+  const cancelRenameProject = () => {
+    setEditingProjectId(null);
+    setEditingProjectName("");
+  };
+
+  const handleRenameProject = async () => {
+    if (!editingProjectId || !editingProjectName.trim()) return;
+    setIsRenamingProject(true);
+    try {
+      const res = await fetch(`/api/projects/${editingProjectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: editingProjectName.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "프로젝트 이름을 변경하지 못했어요");
+        return;
+      }
+      if (currentProject?.id === data.project.id) setCurrentProject(data.project);
+      await refreshProjects();
+      cancelRenameProject();
+      toast.success("프로젝트 이름이 변경됐어요");
+    } catch (err) {
+      toast.error(`프로젝트 이름 변경 실패: ${err instanceof Error ? err.message : "다시 시도해주세요"}`);
+    } finally {
+      setIsRenamingProject(false);
+    }
   };
 
   return (
@@ -238,20 +280,66 @@ export function Sidebar() {
             </motion.div>
           </button>
 
-          <Dropdown open={projectMenuOpen} onClose={() => { setProjectMenuOpen(false); setShowNewProject(false); setNewProjectName(""); }}>
+          <Dropdown open={projectMenuOpen} onClose={() => { setProjectMenuOpen(false); setShowNewProject(false); setNewProjectName(""); cancelRenameProject(); }}>
             <div className="p-1">
               <p className="px-3 py-1.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">프로젝트</p>
               {projects.length === 0 ? (
                 <p className="text-xs text-muted-foreground text-center py-3">프로젝트가 없어요</p>
               ) : (
                 projects.map((project) => (
-                  <button key={project.id}
-                    onClick={() => { setCurrentProject(project); setProjectMenuOpen(false); }}
-                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-secondary transition-colors text-sm"
-                  >
-                    <span className="truncate">{project.name}</span>
-                    {currentProject?.id === project.id && <Check className="w-3.5 h-3.5 text-violet-500 shrink-0" />}
-                  </button>
+                  <div key={project.id}>
+                    {editingProjectId === project.id ? (
+                      <div className="px-2 py-1.5 space-y-2">
+                        <input
+                          autoFocus
+                          type="text"
+                          value={editingProjectName}
+                          onChange={(e) => setEditingProjectName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleRenameProject();
+                            if (e.key === "Escape") cancelRenameProject();
+                          }}
+                          className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:border-violet-400"
+                        />
+                        <div className="flex gap-1.5">
+                          <motion.button
+                            whileTap={{ scale: 0.95 }}
+                            onClick={handleRenameProject}
+                            disabled={!editingProjectName.trim() || isRenamingProject}
+                            className="flex-1 rounded-lg bg-violet-500 py-1.5 text-xs font-medium text-white hover:bg-violet-600 transition-colors disabled:opacity-40"
+                          >
+                            {isRenamingProject ? "저장 중..." : "이름 변경"}
+                          </motion.button>
+                          <motion.button
+                            whileTap={{ scale: 0.95 }}
+                            onClick={cancelRenameProject}
+                            className="flex-1 rounded-lg border border-border py-1.5 text-xs hover:bg-secondary transition-colors"
+                          >
+                            취소
+                          </motion.button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="group flex items-center gap-1 rounded-xl hover:bg-secondary transition-colors">
+                        <button
+                          onClick={() => { setCurrentProject(project); setProjectMenuOpen(false); }}
+                          className="flex min-w-0 flex-1 items-center justify-between px-3 py-2 text-sm"
+                        >
+                          <span className="truncate">{project.name}</span>
+                          {currentProject?.id === project.id && <Check className="w-3.5 h-3.5 text-violet-500 shrink-0" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => startRenameProject(project)}
+                          className="mr-1 rounded-lg p-1.5 text-muted-foreground opacity-0 transition-all hover:bg-background hover:text-foreground group-hover:opacity-100 focus:opacity-100"
+                          aria-label={`${project.name} 이름 변경`}
+                          title="프로젝트 이름 변경"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 ))
               )}
             </div>
@@ -277,7 +365,7 @@ export function Sidebar() {
                   </motion.div>
                 ) : (
                   <motion.button key="btn" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                    onClick={() => setShowNewProject(true)}
+                    onClick={() => { cancelRenameProject(); setShowNewProject(true); }}
                     className="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-secondary transition-colors text-sm text-muted-foreground">
                     <Plus className="w-3.5 h-3.5" />새 프로젝트
                   </motion.button>
@@ -324,10 +412,25 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* 알림 + What's new */}
-      <div className="px-3 pb-2 flex items-center gap-1">
-        <NotificationPanel />
-        <WhatsNewPanel />
+      {/* 슈퍼어드민 + 알림 + What's new */}
+      <div className="px-3 pb-2 space-y-1">
+        {isSuperAdmin && (
+          <Link
+            href="/admin"
+            className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition-colors ${
+              pathname === "/admin"
+                ? "bg-violet-500/10 text-violet-500 font-medium"
+                : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4" />
+            관리자
+          </Link>
+        )}
+        <div className="flex items-center gap-1">
+          <NotificationPanel />
+          <WhatsNewPanel />
+        </div>
       </div>
 
       {/* 하단 프로필 */}
@@ -381,13 +484,13 @@ export function Sidebar() {
                     <button
                       onClick={() => { setProfileOpen(false); setNotifPrefsOpen(true); }}
                       className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-secondary transition-colors text-sm text-muted-foreground hover:text-foreground">
-                      🔔 알림 설정
+                      <NotificationSettingsIcon className="w-3.5 h-3.5" />알림 설정
                     </button>
                     {workspace && (workspace.role === "OWNER" || workspace.role === "ADMIN") && (
                       <button
                         onClick={() => { setProfileOpen(false); setApiTokensOpen(true); }}
                         className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-secondary transition-colors text-sm text-muted-foreground hover:text-foreground">
-                        🔑 API 토큰
+                        <ApiTokenIcon className="w-3.5 h-3.5" />API 토큰
                       </button>
                     )}
                   </div>

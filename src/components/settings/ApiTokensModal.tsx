@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { X, Loader2, Plus, Copy, Check, Trash2, KeyRound, AlertTriangle } from "lucide-react";
+import { X, Loader2, Plus, Copy, Check, Trash2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { formatKstDateTime } from "@/lib/datetime";
+import { ApiTokenIcon } from "@/components/settings/settings-icons";
 
 interface Token {
   id: string;
@@ -47,7 +48,7 @@ export default function ApiTokensModal({ workspaceId, onClose }: Props) {
     }
   }, [workspaceId]);
 
-  useEffect(() => { fetchTokens(); }, [fetchTokens]);
+  useEffect(() => { void Promise.resolve().then(fetchTokens); }, [fetchTokens]);
 
   const handleCreate = async () => {
     if (!form.name.trim()) { toast.error("이름이 필요해요"); return; }
@@ -88,7 +89,7 @@ export default function ApiTokensModal({ workspaceId, onClose }: Props) {
       <div className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="API 토큰">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="flex items-center gap-2">
-            <KeyRound className="w-4 h-4 text-violet-500" />
+            <ApiTokenIcon className="w-4 h-4 text-violet-500" />
             <h2 className="text-sm font-semibold">API 토큰</h2>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground" aria-label="닫기">

@@ -10,6 +10,7 @@ import {
   Download, Upload, ArrowUp, ArrowDown, ChevronsUpDown, Wand2,
   ChevronLeft, ChevronRight, Search, Filter, Activity, Shield,
   RefreshCcw, Bell, Webhook, KeyRound, Eraser, AlertTriangle, ShieldAlert,
+  MoreHorizontal, Link2,
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -158,6 +159,10 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
   const [showImport, setShowImport] = useState(false);
   const [showCleanup, setShowCleanup] = useState(false);
   const [showNormalize, setShowNormalize] = useState(false);
+  const [showDeleteSelectedModal, setShowDeleteSelectedModal] = useState(false);
+  const [showRegenerateKeyModal, setShowRegenerateKeyModal] = useState(false);
+  const [showCleaningMenu, setShowCleaningMenu] = useState(false);
+  const cleaningMenuRef = useRef<HTMLDivElement>(null);
   const [showTest, setShowTest] = useState(false);
   const [showDangerDelete, setShowDangerDelete] = useState(false);
   const [showGdpr, setShowGdpr] = useState(false);
@@ -250,7 +255,6 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
 
   const handleDeleteSelected = async () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`선택한 ${selectedIds.size}건을 삭제할까요? 되돌릴 수 없어요.`)) return;
     setIsDeleting(true);
     try {
       const res = await fetch(`/api/collect-sources/${id}/records`, {
@@ -261,6 +265,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
       const data = await res.json();
       if (!res.ok) { toast.error(data.error ?? "삭제 실패"); return; }
       toast.success(`${data.deleted}건 삭제됐어요`);
+      setShowDeleteSelectedModal(false);
       await fetchRecords();
     } finally {
       setIsDeleting(false);
@@ -379,6 +384,11 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
     }
   }, [id]);
 
+  // 탭별 최초 1회 fetch 최적화 (탭 재방문 시 불필요한 재요청 방지)
+  const hasFetchedRecordsRef = useRef(false);
+  const hasFetchedScriptRef = useRef(false);
+  const hasFetchedActivityRef = useRef(false);
+
   useEffect(() => { fetchSource(); }, [fetchSource]);
   useEffect(() => { setBrowserOrigin(window.location.origin); }, []);
 
@@ -408,9 +418,35 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
     if (!source || !workspace) return;
     if (source.workspaceId !== workspace.id) router.replace("/collect");
   }, [source, workspace, router]);
-  useEffect(() => { if (tab === "records") fetchRecords(); }, [tab, fetchRecords]);
-  useEffect(() => { if (tab === "script") fetchScript(); }, [tab, fetchScript]);
-  useEffect(() => { if (tab === "activity") fetchActivity(); }, [tab, fetchActivity]);
+  useEffect(() => {
+    if (tab === "records" && !hasFetchedRecordsRef.current) {
+      hasFetchedRecordsRef.current = true;
+      fetchRecords();
+    }
+  }, [tab, fetchRecords]);
+  useEffect(() => {
+    if (tab === "script" && !hasFetchedScriptRef.current) {
+      hasFetchedScriptRef.current = true;
+      fetchScript();
+    }
+  }, [tab, fetchScript]);
+  useEffect(() => {
+    if (tab === "activity" && !hasFetchedActivityRef.current) {
+      hasFetchedActivityRef.current = true;
+      fetchActivity();
+    }
+  }, [tab, fetchActivity]);
+
+  // 데이터 정리 드롭다운 외부 클릭 닫기
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (cleaningMenuRef.current && !cleaningMenuRef.current.contains(e.target as Node)) {
+        setShowCleaningMenu(false);
+      }
+    };
+    if (showCleaningMenu) document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showCleaningMenu]);
 
   const handleSaveSecuritySettings = async () => {
     setSavingSettings(true);
@@ -439,7 +475,6 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
   };
 
   const handleRegenerateKey = async () => {
-    if (!confirm("API 키를 재발급할까요? 기존 키로 설치된 스크립트는 즉시 동작을 멈춥니다.")) return;
     setRegeneratingKey(true);
     try {
       const res = await fetch(`/api/collect-sources/${id}/regenerate-key`, { method: "POST" });
@@ -667,7 +702,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
       </div>
 
       {/* 탭 */}
-      <div className="flex gap-1 border-b border-border">
+      <div className="flex gap-1 border-b border-border overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {TABS.map(({ id: tabId, label, icon: Icon }) => (
           <button key={tabId} onClick={() => setTab(tabId)}
             className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
@@ -700,7 +735,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {selectedIds.size > 0 && (
                     <button
-                      onClick={handleDeleteSelected}
+                      onClick={() => setShowDeleteSelectedModal(true)}
                       disabled={isDeleting}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/5 text-red-500 text-xs font-medium hover:bg-red-500/10 transition-colors disabled:opacity-40"
                     >
@@ -714,20 +749,51 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                   >
                     <Upload className="w-3.5 h-3.5" />엑셀/CSV 가져오기
                   </button>
-                  <button
-                    onClick={() => setShowNormalize(true)}
-                    disabled={recordsTotal === 0}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 text-emerald-600 text-xs font-medium hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
-                  >
-                    <Eraser className="w-3.5 h-3.5" />정규화
-                  </button>
-                  <button
-                    onClick={() => setShowCleanup(true)}
-                    disabled={recordsTotal === 0 || source.fieldMappings.length === 0}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/5 text-amber-500 text-xs font-medium hover:bg-amber-500/10 transition-colors disabled:opacity-40"
-                  >
-                    <Wand2 className="w-3.5 h-3.5" />중복 정리
-                  </button>
+                  {/* 데이터 정리 드롭다운 */}
+                  <div ref={cleaningMenuRef} className="relative">
+                    <button
+                      onClick={() => setShowCleaningMenu((v) => !v)}
+                      disabled={recordsTotal === 0}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium hover:bg-secondary transition-colors disabled:opacity-40"
+                    >
+                      <Wand2 className="w-3.5 h-3.5" />데이터 정리
+                      <MoreHorizontal className="w-3 h-3 text-muted-foreground" />
+                    </button>
+                    <AnimatePresence>
+                      {showCleaningMenu && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -4, scale: 0.97 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: -4, scale: 0.97 }}
+                          transition={{ duration: 0.1 }}
+                          className="absolute right-0 top-full mt-1 w-44 bg-background border border-border rounded-xl shadow-lg z-20 overflow-hidden"
+                        >
+                          <button
+                            onClick={() => { setShowNormalize(true); setShowCleaningMenu(false); }}
+                            className="flex items-center gap-2 w-full px-3 py-2.5 text-xs hover:bg-secondary transition-colors text-left"
+                          >
+                            <Eraser className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <div>
+                              <div className="font-medium">정규화</div>
+                              <div className="text-muted-foreground text-[11px]">전화번호·이름 형식 통일</div>
+                            </div>
+                          </button>
+                          <div className="border-t border-border" />
+                          <button
+                            onClick={() => { setShowCleanup(true); setShowCleaningMenu(false); }}
+                            disabled={source.fieldMappings.length === 0}
+                            className="flex items-center gap-2 w-full px-3 py-2.5 text-xs hover:bg-secondary transition-colors text-left disabled:opacity-40"
+                          >
+                            <Wand2 className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                            <div>
+                              <div className="font-medium">중복 정리</div>
+                              <div className="text-muted-foreground text-[11px]">중복 레코드 제거</div>
+                            </div>
+                          </button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
                   <button
                     onClick={handleExportCsv}
                     disabled={recordsTotal === 0}
@@ -755,21 +821,25 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                       className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
                     />
                   </div>
-                  <input
-                    type="date"
-                    value={filterDateFrom}
-                    onChange={(e) => setFilterDateFrom(e.target.value)}
-                    className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
-                    title="시작일 (KST)"
-                  />
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    시작일
+                    <input
+                      type="date"
+                      value={filterDateFrom}
+                      onChange={(e) => setFilterDateFrom(e.target.value)}
+                      className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+                    />
+                  </label>
                   <span className="text-xs text-muted-foreground">~</span>
-                  <input
-                    type="date"
-                    value={filterDateTo}
-                    onChange={(e) => setFilterDateTo(e.target.value)}
-                    className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
-                    title="종료일 (KST)"
-                  />
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    종료일
+                    <input
+                      type="date"
+                      value={filterDateTo}
+                      onChange={(e) => setFilterDateTo(e.target.value)}
+                      className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+                    />
+                  </label>
                   {utmSourceOptions.length > 0 && (
                     <select
                       value={filterUtmSource}
@@ -831,7 +901,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border bg-secondary/50">
-                        <th className="px-3 py-2.5 w-10">
+                        <th className="px-3 py-2.5 w-10 sticky left-0 z-10 bg-secondary/50">
                           <input
                             type="checkbox"
                             checked={pagedRecords.length > 0 && pagedRecords.every((r) => selectedIds.has(r.id))}
@@ -840,7 +910,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                             aria-label="현재 페이지 모두 선택"
                           />
                         </th>
-                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground whitespace-nowrap">
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground whitespace-nowrap sticky left-10 z-10 bg-secondary/50 shadow-[1px_0_0_0_hsl(var(--border))]">
                           <button onClick={() => cycleSort("createdAt")} className="flex items-center gap-1 hover:text-foreground transition-colors">
                             시간 {sortIcon("createdAt")}
                           </button>
@@ -869,9 +939,9 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                         <tr
                           key={record.id}
                           onClick={() => setDetailRecordId(record.id)}
-                          className={`border-b border-border last:border-0 hover:bg-secondary/30 transition-colors cursor-pointer ${selectedIds.has(record.id) ? "bg-violet-500/5" : ""}`}
+                          className={`group border-b border-border last:border-0 hover:bg-secondary/30 transition-colors cursor-pointer ${selectedIds.has(record.id) ? "bg-violet-500/5" : ""}`}
                         >
-                          <td className="px-3 py-3 w-10" onClick={(e) => e.stopPropagation()}>
+                          <td className={`px-3 py-3 w-10 sticky left-0 z-[1] ${selectedIds.has(record.id) ? "bg-violet-500/5" : "bg-background group-hover:bg-secondary/30"}`} onClick={(e) => e.stopPropagation()}>
                             <input
                               type="checkbox"
                               checked={selectedIds.has(record.id)}
@@ -880,7 +950,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                               aria-label="선택"
                             />
                           </td>
-                          <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{timeStr(record.createdAt)}</td>
+                          <td className={`px-4 py-3 text-xs text-muted-foreground whitespace-nowrap sticky left-10 z-[1] shadow-[1px_0_0_0_hsl(var(--border))] ${selectedIds.has(record.id) ? "bg-violet-500/5" : "bg-background group-hover:bg-secondary/30"}`}>{timeStr(record.createdAt)}</td>
                           {source.fieldMappings.map((f) => (
                             <td key={f.id} className="px-4 py-3 text-xs max-w-[160px] truncate">{record.data[f.key] ?? "-"}</td>
                           ))}
@@ -982,26 +1052,6 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                   <p className="text-[11px] text-muted-foreground mt-2">실제 폼 제출 시 스크립트가 감지한 필드예요. "한 번에 적용" 후 라벨과 키를 수정하세요.</p>
                 </div>
               )}
-
-              {/* 트리거/리다이렉트 설정 */}
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">성공 트리거 텍스트</label>
-                  <input type="text" value={successTrigger} onChange={(e) => setSuccessTrigger(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400" />
-                  <p className="text-[11px] text-muted-foreground mt-1">폼 제출 후 이 텍스트가 나타나면 데이터를 수집해요</p>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">제출 후 리다이렉트 URL</label>
-                  <input type="url" value={redirectUrl} onChange={(e) => setRedirectUrl(e.target.value)}
-                    placeholder="https://example.com/thank-you (선택)"
-                    className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400" />
-                </div>
-                <button onClick={handleSaveSettings}
-                  className="px-4 py-2 rounded-xl bg-secondary border border-border text-sm font-medium hover:bg-secondary/80 transition-colors">
-                  설정 저장
-                </button>
-              </div>
 
               {/* 필드 매핑 편집기 */}
               <div className="border-t border-border pt-5">
@@ -1203,50 +1253,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
 
           {/* 보안/알림 탭 */}
           {tab === "settings" && (
-            <div className="space-y-5 max-w-2xl">
-              {/* API 키 */}
-              <div className="p-4 rounded-2xl border border-border bg-background space-y-3">
-                <div className="flex items-center gap-2">
-                  <KeyRound className="w-4 h-4 text-violet-500" />
-                  <h3 className="text-sm font-medium">API 키</h3>
-                </div>
-                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-secondary border border-border">
-                  <span className="text-xs font-mono truncate flex-1">{source.apiKey}</span>
-                  <CopyButton text={source.apiKey} />
-                </div>
-                <div className="flex items-start gap-2">
-                  <button
-                    onClick={handleRegenerateKey}
-                    disabled={regeneratingKey}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/5 text-red-500 text-xs font-medium hover:bg-red-500/10 transition-colors disabled:opacity-40"
-                  >
-                    {regeneratingKey ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCcw className="w-3.5 h-3.5" />}
-                    키 재발급
-                  </button>
-                  <p className="text-[11px] text-muted-foreground">
-                    키가 유출됐거나 정기 교체할 때 사용하세요. 재발급 시 기존 스크립트는 즉시 동작을 멈추고, 새 키로 다시 설치해야 해요.
-                  </p>
-                </div>
-              </div>
-
-              {/* 허용 Origin */}
-              <div className="p-4 rounded-2xl border border-border bg-background space-y-3">
-                <div className="flex items-center gap-2">
-                  <Shield className="w-4 h-4 text-emerald-500" />
-                  <h3 className="text-sm font-medium">허용 Origin (CORS)</h3>
-                </div>
-                <p className="text-[11px] text-muted-foreground">
-                  비워두면 모든 출처에서 호출 가능합니다. 보안을 위해 실제 폼이 있는 도메인만 허용하세요. 한 줄에 하나씩, 또는 쉼표로 구분.
-                </p>
-                <textarea
-                  value={settingsAllowedOrigins}
-                  onChange={(e) => setSettingsAllowedOrigins(e.target.value)}
-                  placeholder={"https://example.com\nhttps://www.example.com"}
-                  rows={3}
-                  className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm font-mono focus:outline-none focus:border-violet-400 resize-none"
-                />
-              </div>
-
+            <div className="space-y-4 max-w-2xl">
               {/* 알림 */}
               <div className="p-4 rounded-2xl border border-border bg-background space-y-3">
                 <div className="flex items-center gap-2">
@@ -1297,9 +1304,50 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                 </details>
               </div>
 
+              {/* 성공 트리거 / 리다이렉트 */}
+              <div className="p-4 rounded-2xl border border-border bg-background space-y-3">
+                <div className="flex items-center gap-2">
+                  <Link2 className="w-4 h-4 text-violet-500" />
+                  <h3 className="text-sm font-medium">제출 성공 동작</h3>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">성공 트리거 텍스트</label>
+                  <input type="text" value={successTrigger} onChange={(e) => setSuccessTrigger(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400" />
+                  <p className="text-[11px] text-muted-foreground mt-1">폼 제출 후 이 텍스트가 나타나면 데이터를 수집해요</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">제출 후 리다이렉트 URL <span className="text-muted-foreground/60">(선택)</span></label>
+                  <input type="url" value={redirectUrl} onChange={(e) => setRedirectUrl(e.target.value)}
+                    placeholder="https://example.com/thank-you"
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400" />
+                </div>
+              </div>
+
+              {/* 허용 Origin */}
+              <div className="p-4 rounded-2xl border border-border bg-background space-y-3">
+                <div className="flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-emerald-500" />
+                  <h3 className="text-sm font-medium">허용 Origin (CORS)</h3>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  비워두면 모든 출처에서 호출 가능합니다. 보안을 위해 실제 폼이 있는 도메인만 허용하세요. 한 줄에 하나씩, 또는 쉼표로 구분.
+                </p>
+                <textarea
+                  value={settingsAllowedOrigins}
+                  onChange={(e) => setSettingsAllowedOrigins(e.target.value)}
+                  placeholder={"https://example.com\nhttps://www.example.com"}
+                  rows={3}
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm font-mono focus:outline-none focus:border-violet-400 resize-none"
+                />
+              </div>
+
               <div className="flex justify-end">
                 <button
-                  onClick={handleSaveSecuritySettings}
+                  onClick={() => {
+                    void handleSaveSettings();
+                    void handleSaveSecuritySettings();
+                  }}
                   disabled={savingSettings}
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
                 >
@@ -1308,8 +1356,33 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                 </button>
               </div>
 
+              {/* API 키 */}
+              <div className="p-4 rounded-2xl border border-border bg-background space-y-3">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-violet-500" />
+                  <h3 className="text-sm font-medium">API 키</h3>
+                </div>
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-secondary border border-border">
+                  <span className="text-xs font-mono truncate flex-1">{source.apiKey}</span>
+                  <CopyButton text={source.apiKey} />
+                </div>
+                <div className="flex items-start gap-2">
+                  <button
+                    onClick={() => setShowRegenerateKeyModal(true)}
+                    disabled={regeneratingKey}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/5 text-red-500 text-xs font-medium hover:bg-red-500/10 transition-colors disabled:opacity-40"
+                  >
+                    {regeneratingKey ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCcw className="w-3.5 h-3.5" />}
+                    키 재발급
+                  </button>
+                  <p className="text-[11px] text-muted-foreground">
+                    키가 유출됐거나 정기 교체할 때 사용하세요. 재발급 시 기존 스크립트는 즉시 동작을 멈추고, 새 키로 다시 설치해야 해요.
+                  </p>
+                </div>
+              </div>
+
               {/* 백업 */}
-              <div className="p-4 rounded-2xl border border-border bg-background space-y-3 mt-6">
+              <div className="p-4 rounded-2xl border border-border bg-background space-y-3">
                 <div className="flex items-center gap-2">
                   <Download className="w-4 h-4 text-violet-500" />
                   <h3 className="text-sm font-medium">데이터 백업</h3>
@@ -1355,7 +1428,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
               </div>
 
               {/* 위험 영역 */}
-              <div className="p-4 rounded-2xl border-2 border-red-500/30 bg-red-500/5 space-y-3 mt-8">
+              <div className="p-4 rounded-2xl border-2 border-red-500/30 bg-red-500/5 space-y-3 mt-4">
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-red-500" />
                   <h3 className="text-sm font-semibold text-red-600 dark:text-red-400">위험 영역</h3>
@@ -1406,6 +1479,76 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
           )}
 
         </motion.div>
+      </AnimatePresence>
+
+      {/* 선택 삭제 확인 모달 */}
+      <AnimatePresence>
+        {showDeleteSelectedModal && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/40 z-40"
+              onClick={() => setShowDeleteSelectedModal(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-background border border-border rounded-2xl p-6 w-80 shadow-xl"
+            >
+              <h3 className="text-base font-semibold mb-2">레코드 삭제</h3>
+              <p className="text-sm text-muted-foreground mb-5">선택한 <span className="font-medium text-foreground">{selectedIds.size.toLocaleString()}건</span>을 삭제할까요? 되돌릴 수 없어요.</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleDeleteSelected}
+                  disabled={isDeleting}
+                  className="flex-1 py-2 rounded-xl bg-red-500 text-white text-sm font-medium hover:bg-red-600 transition-colors disabled:opacity-40"
+                >
+                  {isDeleting ? "삭제 중..." : "삭제"}
+                </button>
+                <button
+                  onClick={() => setShowDeleteSelectedModal(false)}
+                  className="flex-1 py-2 rounded-xl border border-border text-sm hover:bg-secondary transition-colors"
+                >
+                  취소
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* API 키 재발급 확인 모달 */}
+      <AnimatePresence>
+        {showRegenerateKeyModal && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/40 z-40"
+              onClick={() => setShowRegenerateKeyModal(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-background border border-border rounded-2xl p-6 w-80 shadow-xl"
+            >
+              <h3 className="text-base font-semibold mb-2">API 키 재발급</h3>
+              <p className="text-sm text-muted-foreground mb-5">기존 키로 설치된 스크립트는 <span className="font-medium text-foreground">즉시 동작을 멈춥니다</span>. 재발급 후 스크립트를 다시 설치해야 해요.</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setShowRegenerateKeyModal(false); void handleRegenerateKey(); }}
+                  disabled={regeneratingKey}
+                  className="flex-1 py-2 rounded-xl bg-red-500 text-white text-sm font-medium hover:bg-red-600 transition-colors disabled:opacity-40"
+                >
+                  {regeneratingKey ? "재발급 중..." : "재발급"}
+                </button>
+                <button
+                  onClick={() => setShowRegenerateKeyModal(false)}
+                  className="flex-1 py-2 rounded-xl border border-border text-sm hover:bg-secondary transition-colors"
+                >
+                  취소
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
       </AnimatePresence>
 
       {showImport && (

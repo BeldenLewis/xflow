@@ -17,17 +17,19 @@ export default function WhatsNewPanel() {
   const [hasNew, setHasNew] = useState(false);
 
   useEffect(() => {
-    try {
-      let seen = localStorage.getItem(STORAGE_KEY);
-      if (!seen) {
-        seen = localStorage.getItem(LEGACY_STORAGE_KEY);
-        if (seen) {
-          localStorage.setItem(STORAGE_KEY, seen);
-          localStorage.removeItem(LEGACY_STORAGE_KEY);
+    void Promise.resolve().then(() => {
+      try {
+        let seen = localStorage.getItem(STORAGE_KEY);
+        if (!seen) {
+          seen = localStorage.getItem(LEGACY_STORAGE_KEY);
+          if (seen) {
+            localStorage.setItem(STORAGE_KEY, seen);
+            localStorage.removeItem(LEGACY_STORAGE_KEY);
+          }
         }
-      }
-      setHasNew(seen !== latestVersion());
-    } catch { /* private mode */ }
+        setHasNew(seen !== latestVersion());
+      } catch { /* private mode */ }
+    });
   }, []);
 
   const handleOpen = () => {

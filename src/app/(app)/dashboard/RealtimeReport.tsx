@@ -318,7 +318,7 @@ function UtmBreakdownSection({ data }: { data: RealtimeReportData }) {
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <TrendingUp className="w-4 h-4 text-violet-500" />
-          <h3 className="text-sm font-semibold">유입 경로 TOP 5</h3>
+          <h3 className="text-sm font-semibold">유입 경로</h3>
         </div>
         <div className="grid h-8 grid-cols-3 rounded-xl border border-border bg-secondary/30 p-0.5">
           {UTM_TABS.map((t) => (
@@ -337,7 +337,7 @@ function UtmBreakdownSection({ data }: { data: RealtimeReportData }) {
         </div>
       </div>
       {items.length > 0 ? (
-        <div className="space-y-2.5">
+        <div className="overflow-y-auto max-h-[380px] space-y-2.5 pr-1">
           {items.map((item, index) => (
             <div key={item.label}>
               <div className="flex items-center justify-between gap-3 text-xs">

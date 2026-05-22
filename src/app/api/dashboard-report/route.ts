@@ -585,7 +585,7 @@ export async function POST(request: Request) {
       if (!k) continue;
       map.set(k, (map.get(k) ?? 0) + row.count);
     }
-    return topEntriesBySectionMax(map, 5);
+    return topEntriesBySectionMax(map, Infinity);
   }
   const utmBySource = aggregateUtm((row) => row.source);
   const utmByMedium = aggregateUtm((row) => row.medium);

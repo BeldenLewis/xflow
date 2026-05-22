@@ -297,14 +297,29 @@ export function Sidebar() {
         {navItems.map(({ href, icon: Icon, label }) => {
           const isActive = pathname === href || pathname.startsWith(href + "/");
           return (
-            <Link key={href} href={href}
-              className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-colors ${
-                isActive ? "bg-violet-500/10 text-violet-500 font-medium" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-              }`}
-            >
-              <Icon className="w-4 h-4 shrink-0" />
-              <span>{label}</span>
-            </Link>
+            <motion.div key={href} whileTap={{ scale: 0.96 }} className="relative">
+              {isActive && (
+                <motion.div
+                  layoutId="nav-active-bg"
+                  className="absolute inset-0 rounded-xl bg-violet-500/10"
+                  transition={{ type: "spring", stiffness: 400, damping: 32 }}
+                />
+              )}
+              <Link href={href}
+                className={`relative flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-colors ${
+                  isActive ? "text-violet-500 font-medium" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                }`}
+              >
+                <motion.span
+                  animate={{ scale: isActive ? 1.15 : 1 }}
+                  transition={{ type: "spring", stiffness: 400, damping: 20 }}
+                  className="shrink-0"
+                >
+                  <Icon className="w-4 h-4" />
+                </motion.span>
+                <span>{label}</span>
+              </Link>
+            </motion.div>
           );
         })}
       </nav>

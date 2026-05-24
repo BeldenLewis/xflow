@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowDown,
   ArrowUp,
@@ -23,6 +24,8 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
 type SortKey =
   | "name"
@@ -482,25 +485,34 @@ export default function RegistrantsTab({ webinarId }: { webinarId: string }) {
       </div>
 
       <div className="flex items-center justify-end gap-2 flex-wrap">
-        <button
+        <motion.button
+          whileHover={{ y: -1 }}
+          whileTap={{ scale: 0.96 }}
+          transition={spring}
           onClick={() => { setShowManual(true); setShowBulk(false); }}
           className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border text-xs hover:bg-secondary transition-colors"
         >
           <Database className="w-3.5 h-3.5" />DB 등록
-        </button>
-        <button
+        </motion.button>
+        <motion.button
+          whileHover={{ y: -1 }}
+          whileTap={{ scale: 0.96 }}
+          transition={spring}
           onClick={() => { setShowBulk(true); setShowManual(false); }}
           className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border text-xs hover:bg-secondary transition-colors"
         >
           <Upload className="w-3.5 h-3.5" />일괄등록
-        </button>
-        <button
+        </motion.button>
+        <motion.button
+          whileHover={{ y: -1 }}
+          whileTap={{ scale: 0.96 }}
+          transition={spring}
           onClick={handleExport}
           className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border text-xs hover:bg-secondary transition-colors"
         >
           <Download className="w-3.5 h-3.5" />CSV 내보내기
-        </button>
-        <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border bg-background w-full sm:w-[360px]">
+        </motion.button>
+        <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border bg-background w-full sm:w-[360px] transition-colors focus-within:border-violet-400">
           <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <input
             type="text"
@@ -511,24 +523,35 @@ export default function RegistrantsTab({ webinarId }: { webinarId: string }) {
             className="min-w-0 flex-1 text-sm bg-transparent focus:outline-none"
           />
         </div>
-        <button
+        <motion.button
+          whileHover={{ y: -1 }}
+          whileTap={{ scale: 0.96 }}
+          transition={spring}
           onClick={() => { setSearch(searchInput); setPage(1); }}
           className="px-3 py-2 rounded-xl border border-border text-xs hover:bg-secondary transition-colors"
         >
           검색
-        </button>
+        </motion.button>
         {search && (
-          <button
+          <motion.button
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.96 }}
+            transition={spring}
             onClick={() => { setSearch(""); setSearchInput(""); setPage(1); }}
             className="px-3 py-2 rounded-xl border border-border text-xs hover:bg-secondary transition-colors text-muted-foreground"
           >
             초기화
-          </button>
+          </motion.button>
         )}
       </div>
 
+      <AnimatePresence>
       {showManual && (
-        <div
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
@@ -537,15 +560,28 @@ export default function RegistrantsTab({ webinarId }: { webinarId: string }) {
             if (event.target === event.currentTarget) setShowManual(false);
           }}
         >
-          <section className="w-full max-w-3xl max-h-[calc(100vh-48px)] overflow-y-auto rounded-2xl border border-border bg-background shadow-2xl">
+          <motion.section
+            initial={{ opacity: 0, y: 8, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.97 }}
+            transition={spring}
+            className="w-full max-w-3xl max-h-[calc(100vh-48px)] overflow-y-auto rounded-2xl border border-border bg-background shadow-2xl"
+          >
             <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-border bg-background/95 px-5 py-4 backdrop-blur">
               <div>
                 <h3 id="manual-registration-title" className="text-sm font-semibold">DB 직접 등록</h3>
                 <p className="text-xs text-muted-foreground mt-1">운영자가 직접 등록자를 추가합니다.</p>
               </div>
-              <button onClick={() => setShowManual(false)} className="p-1.5 rounded-lg hover:bg-secondary transition-colors" aria-label="닫기">
+              <motion.button
+                whileHover={{ rotate: 90 }}
+                whileTap={{ scale: 0.9 }}
+                transition={spring}
+                onClick={() => setShowManual(false)}
+                className="p-1.5 rounded-lg hover:bg-secondary transition-colors"
+                aria-label="닫기"
+              >
                 <X className="w-4 h-4 text-muted-foreground" />
-              </button>
+              </motion.button>
             </div>
 
             <div className="p-5 space-y-4">
@@ -570,21 +606,30 @@ export default function RegistrantsTab({ webinarId }: { webinarId: string }) {
                   <option value="update">중복이면 기존 데이터 갱신</option>
                   <option value="include">중복 포함 등록</option>
                 </select>
-                <button
+                <motion.button
+                  whileHover={{ y: -1 }}
+                  whileTap={{ scale: 0.96 }}
+                  transition={spring}
                   onClick={submitManual}
                   disabled={isSaving}
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-50"
                 >
                   <Plus className="w-4 h-4" />등록
-                </button>
+                </motion.button>
               </div>
             </div>
-          </section>
-        </div>
+          </motion.section>
+        </motion.div>
       )}
+      </AnimatePresence>
 
+      <AnimatePresence>
       {showBulk && (
-        <div
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
@@ -593,15 +638,28 @@ export default function RegistrantsTab({ webinarId }: { webinarId: string }) {
             if (event.target === event.currentTarget) setShowBulk(false);
           }}
         >
-          <section className="w-full max-w-4xl max-h-[calc(100vh-48px)] overflow-y-auto rounded-2xl border border-border bg-background shadow-2xl">
+          <motion.section
+            initial={{ opacity: 0, y: 8, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.97 }}
+            transition={spring}
+            className="w-full max-w-4xl max-h-[calc(100vh-48px)] overflow-y-auto rounded-2xl border border-border bg-background shadow-2xl"
+          >
             <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-border bg-background/95 px-5 py-4 backdrop-blur">
               <div>
                 <h3 id="bulk-registration-title" className="text-sm font-semibold">CSV / 텍스트 일괄등록</h3>
                 <p className="text-xs text-muted-foreground mt-1">헤더가 있으면 자동 매핑하고, 없으면 이름, 연락처, 이메일, 회사 순서로 읽습니다.</p>
               </div>
-              <button onClick={() => setShowBulk(false)} className="p-1.5 rounded-lg hover:bg-secondary transition-colors" aria-label="닫기">
+              <motion.button
+                whileHover={{ rotate: 90 }}
+                whileTap={{ scale: 0.9 }}
+                transition={spring}
+                onClick={() => setShowBulk(false)}
+                className="p-1.5 rounded-lg hover:bg-secondary transition-colors"
+                aria-label="닫기"
+              >
                 <X className="w-4 h-4 text-muted-foreground" />
-              </button>
+              </motion.button>
             </div>
 
             <div className="p-5 space-y-4">
@@ -658,21 +716,30 @@ export default function RegistrantsTab({ webinarId }: { webinarId: string }) {
               )}
 
               <div className="flex justify-end border-t border-border pt-4">
-                <button
+                <motion.button
+                  whileHover={{ y: -1 }}
+                  whileTap={{ scale: 0.96 }}
+                  transition={spring}
                   onClick={submitBulk}
                   disabled={isSaving || parsedBulk.length === 0}
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-50"
                 >
                   <Upload className="w-4 h-4" />{parsedBulk.length.toLocaleString()}명 일괄등록
-                </button>
+                </motion.button>
               </div>
             </div>
-          </section>
-        </div>
+          </motion.section>
+        </motion.div>
       )}
+      </AnimatePresence>
 
+      <AnimatePresence>
       {selectedRegistration && detailDraft && (
-        <div
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
           className="fixed inset-0 z-50 flex justify-end bg-black/35 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
@@ -681,15 +748,28 @@ export default function RegistrantsTab({ webinarId }: { webinarId: string }) {
             if (event.target === event.currentTarget) closeRegistrationDetail();
           }}
         >
-          <aside className="h-full w-full max-w-md overflow-y-auto border-l border-border bg-background shadow-2xl">
+          <motion.aside
+            initial={{ x: "100%" }}
+            animate={{ x: 0 }}
+            exit={{ x: "100%" }}
+            transition={spring}
+            className="h-full w-full max-w-md overflow-y-auto border-l border-border bg-background shadow-2xl"
+          >
             <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-border bg-background/95 px-5 py-4 backdrop-blur">
               <div>
                 <h3 id="registration-detail-title" className="text-sm font-semibold">등록자 상세</h3>
                 <p className="text-xs text-muted-foreground mt-1">정보를 확인하고 바로 수정합니다.</p>
               </div>
-              <button onClick={closeRegistrationDetail} className="p-1.5 rounded-lg hover:bg-secondary transition-colors" aria-label="닫기">
+              <motion.button
+                whileHover={{ rotate: 90 }}
+                whileTap={{ scale: 0.9 }}
+                transition={spring}
+                onClick={closeRegistrationDetail}
+                className="p-1.5 rounded-lg hover:bg-secondary transition-colors"
+                aria-label="닫기"
+              >
                 <X className="w-4 h-4 text-muted-foreground" />
-              </button>
+              </motion.button>
             </div>
 
             <div className="p-5 space-y-5">
@@ -725,24 +805,31 @@ export default function RegistrantsTab({ webinarId }: { webinarId: string }) {
               </div>
 
               <div className="flex gap-2 border-t border-border pt-4">
-                <button
+                <motion.button
+                  whileHover={{ y: -1 }}
+                  whileTap={{ scale: 0.97 }}
+                  transition={spring}
                   onClick={saveRegistrationDetail}
                   disabled={isSaving}
                   className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-violet-600 disabled:opacity-50"
                 >
                   <Save className="w-4 h-4" />저장
-                </button>
-                <button
+                </motion.button>
+                <motion.button
+                  whileHover={{ y: -1 }}
+                  whileTap={{ scale: 0.97 }}
+                  transition={spring}
                   onClick={() => deleteRegistration(selectedRegistration)}
                   className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-red-500/30 px-4 py-2.5 text-sm text-red-500 transition-colors hover:bg-red-500/10"
                 >
                   <Trash2 className="w-4 h-4" />삭제
-                </button>
+                </motion.button>
               </div>
             </div>
-          </aside>
-        </div>
+          </motion.aside>
+        </motion.div>
       )}
+      </AnimatePresence>
 
       {isLoading ? (
         <div className="flex items-center justify-center h-40">
@@ -809,20 +896,26 @@ export default function RegistrantsTab({ webinarId }: { webinarId: string }) {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <button
+                        <motion.button
+                          whileHover={{ y: -1 }}
+                          whileTap={{ scale: 0.92 }}
+                          transition={spring}
                           onClick={() => openRegistrationDetail(r)}
                           className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
                           title="상세/수정"
                         >
                           <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
+                        </motion.button>
+                        <motion.button
+                          whileHover={{ y: -1 }}
+                          whileTap={{ scale: 0.92 }}
+                          transition={spring}
                           onClick={() => deleteRegistration(r)}
                           className="p-1.5 rounded-lg hover:bg-red-500/10 hover:text-red-500 text-muted-foreground transition-colors"
                           title="삭제"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        </motion.button>
                       </td>
                     </tr>
                   ))}
@@ -848,11 +941,11 @@ export default function RegistrantsTab({ webinarId }: { webinarId: string }) {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={() => setPage(1)} disabled={page === 1} className="p-1.5 rounded-lg border border-border hover:bg-secondary disabled:opacity-40 transition-colors"><ChevronsLeft className="w-4 h-4" /></button>
-              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="p-1.5 rounded-lg border border-border hover:bg-secondary disabled:opacity-40 transition-colors"><ChevronLeft className="w-4 h-4" /></button>
+              <motion.button whileHover={{ y: -1 }} whileTap={{ scale: 0.92 }} transition={spring} onClick={() => setPage(1)} disabled={page === 1} className="p-1.5 rounded-lg border border-border hover:bg-secondary disabled:opacity-40 transition-colors"><ChevronsLeft className="w-4 h-4" /></motion.button>
+              <motion.button whileHover={{ y: -1 }} whileTap={{ scale: 0.92 }} transition={spring} onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="p-1.5 rounded-lg border border-border hover:bg-secondary disabled:opacity-40 transition-colors"><ChevronLeft className="w-4 h-4" /></motion.button>
               <span className="text-sm text-muted-foreground tabular-nums">{page} / {totalPages}</span>
-              <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="p-1.5 rounded-lg border border-border hover:bg-secondary disabled:opacity-40 transition-colors"><ChevronRight className="w-4 h-4" /></button>
-              <button onClick={() => setPage(totalPages)} disabled={page === totalPages} className="p-1.5 rounded-lg border border-border hover:bg-secondary disabled:opacity-40 transition-colors"><ChevronsRight className="w-4 h-4" /></button>
+              <motion.button whileHover={{ y: -1 }} whileTap={{ scale: 0.92 }} transition={spring} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="p-1.5 rounded-lg border border-border hover:bg-secondary disabled:opacity-40 transition-colors"><ChevronRight className="w-4 h-4" /></motion.button>
+              <motion.button whileHover={{ y: -1 }} whileTap={{ scale: 0.92 }} transition={spring} onClick={() => setPage(totalPages)} disabled={page === totalPages} className="p-1.5 rounded-lg border border-border hover:bg-secondary disabled:opacity-40 transition-colors"><ChevronsRight className="w-4 h-4" /></motion.button>
             </div>
           </div>
         </>

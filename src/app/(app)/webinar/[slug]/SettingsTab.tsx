@@ -1,8 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
 interface Webinar {
   id: string;
@@ -87,7 +90,7 @@ export default function SettingsTab({ webinar, onUpdate }: { webinar: Webinar; o
               type="text"
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400 transition-colors"
             />
           </div>
           <div>
@@ -96,7 +99,7 @@ export default function SettingsTab({ webinar, onUpdate }: { webinar: Webinar; o
               rows={2}
               value={form.description}
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm resize-none focus:outline-none focus:border-violet-400"
+              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm resize-none focus:outline-none focus:border-violet-400 transition-colors"
             />
           </div>
         </div>
@@ -112,7 +115,7 @@ export default function SettingsTab({ webinar, onUpdate }: { webinar: Webinar; o
               type="datetime-local"
               value={form.signupDeadline}
               onChange={(e) => setForm((f) => ({ ...f, signupDeadline: e.target.value }))}
-              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400 transition-colors"
             />
           </div>
           <div>
@@ -121,7 +124,7 @@ export default function SettingsTab({ webinar, onUpdate }: { webinar: Webinar; o
               type="datetime-local"
               value={form.liveStartAt}
               onChange={(e) => setForm((f) => ({ ...f, liveStartAt: e.target.value }))}
-              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400 transition-colors"
             />
           </div>
           <div>
@@ -130,7 +133,7 @@ export default function SettingsTab({ webinar, onUpdate }: { webinar: Webinar; o
               type="datetime-local"
               value={form.liveEndAt}
               onChange={(e) => setForm((f) => ({ ...f, liveEndAt: e.target.value }))}
-              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400 transition-colors"
             />
           </div>
         </div>
@@ -147,7 +150,7 @@ export default function SettingsTab({ webinar, onUpdate }: { webinar: Webinar; o
               placeholder="예: dQw4w9WgXcQ"
               value={form.youtubeId}
               onChange={(e) => setForm((f) => ({ ...f, youtubeId: e.target.value }))}
-              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm font-mono focus:outline-none focus:border-violet-400"
+              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm font-mono focus:outline-none focus:border-violet-400 transition-colors"
             />
           </div>
           <div>
@@ -157,7 +160,7 @@ export default function SettingsTab({ webinar, onUpdate }: { webinar: Webinar; o
               placeholder="https://calendar.google.com/..."
               value={form.calendarUrl}
               onChange={(e) => setForm((f) => ({ ...f, calendarUrl: e.target.value }))}
-              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400 transition-colors"
             />
           </div>
           <div>
@@ -167,32 +170,50 @@ export default function SettingsTab({ webinar, onUpdate }: { webinar: Webinar; o
               placeholder="https://tally.so/..."
               value={form.surveyUrl}
               onChange={(e) => setForm((f) => ({ ...f, surveyUrl: e.target.value }))}
-              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400 transition-colors"
             />
           </div>
         </div>
       </section>
 
-      <button
+      <motion.button
+        whileHover={{ y: -1 }}
+        whileTap={{ scale: 0.97 }}
+        transition={spring}
         onClick={handleSave}
         disabled={!form.name.trim() || isSaving}
         className="px-5 py-2.5 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
       >
         {isSaving ? "저장 중..." : "설정 저장"}
-      </button>
+      </motion.button>
 
       {/* 위험 구역 */}
       <section className="space-y-3 pt-4 border-t border-border">
         <h3 className="text-sm font-semibold text-red-500">위험 구역</h3>
+        <AnimatePresence mode="wait" initial={false}>
         {!showDeleteConfirm ? (
-          <button
+          <motion.button
+            key="open"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.97 }}
+            transition={spring}
             onClick={() => setShowDeleteConfirm(true)}
             className="px-4 py-2 rounded-xl border border-red-500/30 text-red-500 text-sm hover:bg-red-500/10 transition-colors"
           >
             웨비나 삭제
-          </button>
+          </motion.button>
         ) : (
-          <div className="p-4 rounded-2xl border border-red-500/30 bg-red-500/5 space-y-3">
+          <motion.div
+            key="confirm"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={spring}
+            className="p-4 rounded-2xl border border-red-500/30 bg-red-500/5 space-y-3"
+          >
             <p className="text-sm text-red-500">모든 등록자, Q&A, 공지 데이터가 삭제돼요. 되돌릴 수 없어요.</p>
             <p className="text-xs text-muted-foreground">확인을 위해 웨비나 이름 <strong>{webinar.name}</strong>을 입력하세요</p>
             <input
@@ -200,25 +221,32 @@ export default function SettingsTab({ webinar, onUpdate }: { webinar: Webinar; o
               placeholder={webinar.name}
               value={deleteInput}
               onChange={(e) => setDeleteInput(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-red-500/30 bg-background text-sm focus:outline-none focus:border-red-500"
+              className="w-full px-3 py-2 rounded-xl border border-red-500/30 bg-background text-sm focus:outline-none focus:border-red-500 transition-colors"
             />
             <div className="flex gap-2">
-              <button
+              <motion.button
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.96 }}
+                transition={spring}
                 onClick={handleDelete}
                 disabled={deleteInput !== webinar.name || isDeleting}
                 className="px-4 py-2 rounded-xl bg-red-500 text-white text-sm font-medium hover:bg-red-600 transition-colors disabled:opacity-40"
               >
                 {isDeleting ? "삭제 중..." : "삭제"}
-              </button>
-              <button
+              </motion.button>
+              <motion.button
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.96 }}
+                transition={spring}
                 onClick={() => { setShowDeleteConfirm(false); setDeleteInput(""); }}
                 className="px-4 py-2 rounded-xl border border-border text-sm hover:bg-secondary transition-colors"
               >
                 취소
-              </button>
+              </motion.button>
             </div>
-          </div>
+          </motion.div>
         )}
+        </AnimatePresence>
       </section>
     </div>
   );

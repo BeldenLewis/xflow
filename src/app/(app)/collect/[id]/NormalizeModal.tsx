@@ -1,8 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { X, Loader2, Check, Sparkles, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
+
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
 interface FieldMapping {
   id: string;
@@ -78,16 +81,36 @@ export default function NormalizeModal({ sourceId, fieldMappings, onClose, onApp
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 8, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 8, scale: 0.97 }}
+        transition={spring}
+        className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-amber-500" />
             <h2 className="text-sm font-semibold">데이터 정규화</h2>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground">
+          <motion.button
+            whileHover={{ rotate: 90 }}
+            whileTap={{ scale: 0.9 }}
+            transition={spring}
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground transition-colors"
+          >
             <X className="w-4 h-4" />
-          </button>
+          </motion.button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
@@ -112,17 +135,27 @@ export default function NormalizeModal({ sourceId, fieldMappings, onClose, onApp
             ))}
           </div>
 
-          <button
+          <motion.button
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.97 }}
+            transition={spring}
             onClick={handleAnalyze}
             disabled={analyzing || selectedOps.size === 0}
             className="w-full flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl border border-border text-sm font-medium hover:bg-secondary transition-colors disabled:opacity-40"
           >
             {analyzing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
             {analyzing ? "분석 중..." : "변경 사항 분석"}
-          </button>
+          </motion.button>
 
+          <AnimatePresence>
           {preview && (
-            <div className="space-y-3">
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={spring}
+              className="space-y-3"
+            >
               <div className="grid grid-cols-2 gap-3">
                 <div className="p-3 rounded-xl border border-border bg-secondary/30">
                   <p className="text-[11px] text-muted-foreground">변경될 레코드</p>
@@ -144,19 +177,27 @@ export default function NormalizeModal({ sourceId, fieldMappings, onClose, onApp
                   <p className="text-amber-700 dark:text-amber-400">되돌릴 수 없어요. 중요 데이터는 먼저 CSV로 내보내두세요.</p>
                 </div>
               )}
-            </div>
+            </motion.div>
           )}
+          </AnimatePresence>
         </div>
 
         {preview && preview.changedRows > 0 && (
           <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-secondary/30">
-            <button onClick={handleApply} disabled={applying} className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40">
+            <motion.button
+              whileHover={{ y: -1 }}
+              whileTap={{ scale: 0.96 }}
+              transition={spring}
+              onClick={handleApply}
+              disabled={applying}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
+            >
               {applying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
               {applying ? "적용 중..." : `${preview.changedRows}건 정규화 적용`}
-            </button>
+            </motion.button>
           </div>
         )}
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

@@ -1,9 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 import { X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { NotificationSettingsIcon } from "@/components/settings/settings-icons";
+
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
 interface Pref {
   eventType: string;
@@ -38,16 +41,39 @@ export default function NotificationPrefsModal({ onClose }: { onClose: () => voi
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="알림 설정">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 8, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 8, scale: 0.97 }}
+        transition={spring}
+        className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label="알림 설정"
+      >
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="flex items-center gap-2">
             <NotificationSettingsIcon className="w-4 h-4 text-violet-500" />
             <h2 className="text-sm font-semibold">알림 설정</h2>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground" aria-label="닫기">
+          <motion.button
+            whileHover={{ rotate: 90 }}
+            whileTap={{ scale: 0.9 }}
+            transition={spring}
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground transition-colors"
+            aria-label="닫기"
+          >
             <X className="w-4 h-4" />
-          </button>
+          </motion.button>
         </div>
         <div className="flex-1 overflow-y-auto p-5">
           <p className="text-xs text-muted-foreground mb-4">받고 싶은 인앱 알림 종류를 선택하세요.</p>
@@ -69,7 +95,7 @@ export default function NotificationPrefsModal({ onClose }: { onClose: () => voi
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

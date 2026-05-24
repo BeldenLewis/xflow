@@ -1,8 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 import { Loader2, Clock, Check } from "lucide-react";
 import { toast } from "sonner";
+
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
 interface Props { sourceId: string }
 
@@ -43,7 +46,10 @@ export default function RetentionPolicyEditor({ sourceId }: Props) {
     <div className="space-y-2">
       <div className="flex items-center gap-2 flex-wrap">
         {presets.map((d) => (
-          <button
+          <motion.button
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.96 }}
+            transition={spring}
             key={d}
             onClick={() => handleSave(d)}
             disabled={saving}
@@ -54,7 +60,7 @@ export default function RetentionPolicyEditor({ sourceId }: Props) {
             }`}
           >
             {d === 0 ? "영구 보관" : `${d}일`}
-          </button>
+          </motion.button>
         ))}
         <input
           type="number"
@@ -62,7 +68,7 @@ export default function RetentionPolicyEditor({ sourceId }: Props) {
           value={retainDays}
           onChange={(e) => setRetainDays(parseInt(e.target.value) || 0)}
           onBlur={() => handleSave(retainDays)}
-          className="w-20 px-2 py-1.5 rounded-lg border border-border bg-background text-xs"
+          className="w-20 px-2 py-1.5 rounded-lg border border-border bg-background text-xs transition-colors focus:border-violet-400 focus:outline-none"
         />
         {saving && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
       </div>

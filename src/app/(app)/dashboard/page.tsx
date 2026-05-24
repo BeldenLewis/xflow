@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Filter, LayoutDashboard, Loader2, RefreshCw, X } from "lucide-react";
 import { useWorkspace } from "@/contexts/workspace";
 import { kstDateString } from "@/lib/datetime";
@@ -8,6 +9,7 @@ import DateRangePicker, { DateRange } from "./DateRangePicker";
 import RealtimeReport, { type RealtimeReportData } from "./RealtimeReport";
 
 const AUTO_REFRESH_MS = 30_000;
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
 interface DashboardFilters {
   sourceId?: string;
@@ -150,7 +152,10 @@ export default function DashboardPage() {
 
         <div className="flex flex-wrap items-center gap-2">
           <DateRangePicker value={range} onChange={setRange} />
-          <button
+          <motion.button
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.96 }}
+            transition={spring}
             onClick={() => setShowFilters((open) => !open)}
             className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors ${
               showFilters || hasActiveFilter
@@ -165,32 +170,45 @@ export default function DashboardPage() {
                 {filterCount}
               </span>
             )}
-          </button>
-          <button
+          </motion.button>
+          <motion.button
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.96 }}
+            transition={spring}
             onClick={() => setRefreshTick((tick) => tick + 1)}
             className="rounded-xl border border-border p-1.5 text-muted-foreground transition-colors hover:bg-secondary"
             title="새로고침"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${reportLoading ? "animate-spin" : ""}`} />
-          </button>
+          </motion.button>
         </div>
       </div>
 
+      <AnimatePresence initial={false}>
       {showFilters && (
-        <div className="rounded-2xl border border-border bg-background p-4">
+        <motion.div
+          initial={{ opacity: 0, y: -4, height: 0 }}
+          animate={{ opacity: 1, y: 0, height: "auto" }}
+          exit={{ opacity: 0, y: -4, height: 0 }}
+          transition={spring}
+          className="overflow-hidden rounded-2xl border border-border bg-background p-4"
+        >
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="text-sm font-semibold">보고서 필터</h2>
               <p className="mt-0.5 text-xs text-muted-foreground">선택한 조건은 실시간 보고서 전체에 적용됩니다.</p>
             </div>
             {hasActiveFilter && (
-              <button
+              <motion.button
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.96 }}
+                transition={spring}
                 onClick={clearFilters}
                 className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
               >
                 <X className="h-3 w-3" />
                 초기화
-              </button>
+              </motion.button>
             )}
           </div>
 
@@ -244,26 +262,35 @@ export default function DashboardPage() {
 
             <div className="space-y-1.5">
               <span className="text-xs font-medium text-muted-foreground">기여 기준</span>
-              <div className="grid h-10 grid-cols-2 rounded-xl border border-border bg-secondary/30 p-1">
-                {(["last", "first"] as const).map((attribution) => (
-                  <button
-                    key={attribution}
-                    onClick={() => setFilters((current) => ({ ...current, attribution }))}
-                    className={`rounded-lg text-xs font-medium transition-colors ${
-                      (filters.attribution ?? "last") === attribution
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                    title={attribution === "last" ? "최종 유입 기준" : "최초 유입 기준"}
-                  >
-                    {attribution === "last" ? "Last" : "First"}
-                  </button>
-                ))}
+              <div className="relative grid h-10 grid-cols-2 rounded-xl border border-border bg-secondary/30 p-1">
+                {(["last", "first"] as const).map((attribution) => {
+                  const active = (filters.attribution ?? "last") === attribution;
+                  return (
+                    <button
+                      key={attribution}
+                      onClick={() => setFilters((current) => ({ ...current, attribution }))}
+                      className={`relative z-10 rounded-lg text-xs font-medium transition-colors ${
+                        active ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      title={attribution === "last" ? "최종 유입 기준" : "최초 유입 기준"}
+                    >
+                      {active && (
+                        <motion.span
+                          layoutId="attribution-pill"
+                          transition={spring}
+                          className="absolute inset-0 -z-10 rounded-lg bg-background shadow-sm"
+                        />
+                      )}
+                      {attribution === "last" ? "Last" : "First"}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
-        </div>
+        </motion.div>
       )}
+      </AnimatePresence>
 
       <RealtimeReport data={reportData} loading={reportLoading} rangeLabel={range.label} />
     </div>

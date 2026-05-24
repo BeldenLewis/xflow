@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ElementType } from "react";
+import { motion } from "framer-motion";
+
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 import {
   Activity,
   CheckCircle2,
@@ -182,7 +185,10 @@ function NextStepCard({
   onClick: () => void;
 }) {
   return (
-    <button
+    <motion.button
+      whileHover={{ y: -1, borderColor: "rgba(139, 92, 246, 0.18)" }}
+      whileTap={{ scale: 0.98 }}
+      transition={spring}
       type="button"
       onClick={onClick}
       className="flex items-start gap-3 rounded-2xl border border-border bg-background p-4 text-left transition-colors hover:bg-secondary/40"
@@ -196,7 +202,7 @@ function NextStepCard({
         <span className="block text-sm font-medium">{label}</span>
         <span className="mt-1 block text-xs leading-5 text-muted-foreground">{desc}</span>
       </span>
-    </button>
+    </motion.button>
   );
 }
 
@@ -273,14 +279,17 @@ export default function DashboardTab({
           <h2 className="text-sm font-semibold">운영 대시보드</h2>
           <p className="text-sm text-muted-foreground mt-1">등록, 입장, 체류, Q&A 상태를 한 화면에서 확인합니다.</p>
         </div>
-        <button
+        <motion.button
+          whileHover={{ y: -1 }}
+          whileTap={{ scale: 0.96 }}
+          transition={spring}
           onClick={() => fetchDashboard(true)}
           disabled={isRefreshing}
           className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border text-xs hover:bg-secondary transition-colors disabled:opacity-50"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
           새로고침
-        </button>
+        </motion.button>
       </div>
 
       <section className="rounded-2xl border border-border bg-secondary/20 p-4">

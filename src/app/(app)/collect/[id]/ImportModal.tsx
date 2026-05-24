@@ -1,8 +1,11 @@
 "use client";
 
 import { useState, useRef } from "react";
+import { motion } from "framer-motion";
 import { Upload, X, FileSpreadsheet, Loader2, ArrowRight, Check } from "lucide-react";
 import { toast } from "sonner";
+
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
 interface FieldMapping {
   id: string;
@@ -477,8 +480,19 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
     : 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
-      <div
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 8, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 8, scale: 0.97 }}
+        transition={spring}
         className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
@@ -488,9 +502,15 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
             <h2 className="text-sm font-semibold">엑셀/CSV 데이터 가져오기</h2>
             {fileName && <span className="text-xs text-muted-foreground">· {fileName}</span>}
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground">
+          <motion.button
+            whileHover={{ rotate: 90 }}
+            whileTap={{ scale: 0.9 }}
+            transition={spring}
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground transition-colors"
+          >
             <X className="w-4 h-4" />
-          </button>
+          </motion.button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-5">
@@ -787,7 +807,7 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
             </div>
           </div>
         )}
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

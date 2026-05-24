@@ -1,10 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { X, Loader2, Plus, Copy, Check, Trash2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { formatKstDateTime } from "@/lib/datetime";
 import { ApiTokenIcon } from "@/components/settings/settings-icons";
+
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
 interface Token {
   id: string;
@@ -85,16 +88,39 @@ export default function ApiTokensModal({ workspaceId, onClose }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="API 토큰">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 8, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 8, scale: 0.97 }}
+        transition={spring}
+        className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label="API 토큰"
+      >
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="flex items-center gap-2">
             <ApiTokenIcon className="w-4 h-4 text-violet-500" />
             <h2 className="text-sm font-semibold">API 토큰</h2>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground" aria-label="닫기">
+          <motion.button
+            whileHover={{ rotate: 90 }}
+            whileTap={{ scale: 0.9 }}
+            transition={spring}
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground transition-colors"
+            aria-label="닫기"
+          >
             <X className="w-4 h-4" />
-          </button>
+          </motion.button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
@@ -102,24 +128,66 @@ export default function ApiTokensModal({ workspaceId, onClose }: Props) {
             외부 도구(Zapier, n8n, Postman 등)에서 mach API 를 호출할 때 사용합니다. 토큰은 발급 직후 한 번만 표시되니 안전한 곳에 저장하세요.
           </p>
 
+          <AnimatePresence>
           {newToken && (
-            <div className="p-4 rounded-xl border-2 border-violet-500/30 bg-violet-500/5 space-y-2">
-              <p className="text-xs font-semibold text-violet-600 dark:text-violet-400">새 토큰이 발급됐어요 — 지금 복사하세요</p>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-xs font-mono break-all">{newToken}</code>
-                <button onClick={copyNewToken} className="p-2 rounded-lg border border-border hover:bg-secondary" aria-label="복사">
-                  {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+            <motion.div
+              initial={{ opacity: 0, y: -4, height: 0 }}
+              animate={{ opacity: 1, y: 0, height: "auto" }}
+              exit={{ opacity: 0, y: -4, height: 0 }}
+              transition={spring}
+              className="overflow-hidden"
+            >
+              <div className="p-4 rounded-xl border-2 border-violet-500/30 bg-violet-500/5 space-y-2">
+                <p className="text-xs font-semibold text-violet-600 dark:text-violet-400">새 토큰이 발급됐어요 — 지금 복사하세요</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-xs font-mono break-all">{newToken}</code>
+                  <motion.button
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.92 }}
+                    transition={spring}
+                    onClick={copyNewToken}
+                    className="p-2 rounded-lg border border-border hover:bg-secondary transition-colors"
+                    aria-label="복사"
+                  >
+                    <AnimatePresence mode="wait" initial={false}>
+                      {copied ? (
+                        <motion.span
+                          key="check"
+                          initial={{ scale: 0, rotate: -90 }}
+                          animate={{ scale: 1, rotate: 0 }}
+                          exit={{ scale: 0, rotate: 90 }}
+                          transition={spring}
+                        >
+                          <Check className="w-3.5 h-3.5 text-green-500" />
+                        </motion.span>
+                      ) : (
+                        <motion.span
+                          key="copy"
+                          initial={{ scale: 0, rotate: -90 }}
+                          animate={{ scale: 1, rotate: 0 }}
+                          exit={{ scale: 0, rotate: 90 }}
+                          transition={spring}
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </motion.span>
+                      )}
+                    </AnimatePresence>
+                  </motion.button>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  <AlertTriangle className="inline w-3 h-3 mr-1 text-amber-500" />
+                  이 토큰은 다시 표시되지 않아요. 잃어버리면 새로 발급해야 합니다.
+                </p>
+                <button
+                  onClick={() => setNewToken(null)}
+                  className="text-xs text-muted-foreground hover:text-foreground mt-2 transition-colors"
+                >
+                  확인했어요 — 닫기
                 </button>
               </div>
-              <p className="text-[11px] text-muted-foreground">
-                <AlertTriangle className="inline w-3 h-3 mr-1 text-amber-500" />
-                이 토큰은 다시 표시되지 않아요. 잃어버리면 새로 발급해야 합니다.
-              </p>
-              <button onClick={() => setNewToken(null)} className="text-xs text-muted-foreground hover:text-foreground mt-2">
-                확인했어요 — 닫기
-              </button>
-            </div>
+            </motion.div>
           )}
+          </AnimatePresence>
 
           {/* 새 토큰 폼 */}
           <div className="p-4 rounded-xl border border-border space-y-3">
@@ -127,7 +195,7 @@ export default function ApiTokensModal({ workspaceId, onClose }: Props) {
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
               placeholder="토큰 이름 (예: Zapier 연동)"
-              className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+              className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:border-violet-400 transition-colors"
             />
             <div>
               <label className="text-xs text-muted-foreground mb-1.5 block">권한 (scopes)</label>
@@ -154,7 +222,7 @@ export default function ApiTokensModal({ workspaceId, onClose }: Props) {
               <select
                 value={form.expiresInDays}
                 onChange={(e) => setForm((f) => ({ ...f, expiresInDays: parseInt(e.target.value) }))}
-                className="px-3 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+                className="px-3 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400 transition-colors"
               >
                 <option value={0}>만료 없음</option>
                 <option value={30}>30일</option>
@@ -162,10 +230,17 @@ export default function ApiTokensModal({ workspaceId, onClose }: Props) {
                 <option value={365}>1년</option>
               </select>
             </div>
-            <button onClick={handleCreate} disabled={creating || !form.name.trim()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-500 text-white text-xs font-medium hover:bg-violet-600 disabled:opacity-40">
+            <motion.button
+              whileHover={{ y: -1 }}
+              whileTap={{ scale: 0.96 }}
+              transition={spring}
+              onClick={handleCreate}
+              disabled={creating || !form.name.trim()}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-500 text-white text-xs font-medium hover:bg-violet-600 disabled:opacity-40 transition-colors"
+            >
               {creating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
               토큰 발급
-            </button>
+            </motion.button>
           </div>
 
           {/* 기존 토큰 목록 */}
@@ -177,8 +252,18 @@ export default function ApiTokensModal({ workspaceId, onClose }: Props) {
               <p className="text-xs text-muted-foreground text-center py-6">아직 토큰이 없어요</p>
             ) : (
               <div className="space-y-1.5">
+                <AnimatePresence initial={false}>
                 {tokens.map((t) => (
-                  <div key={t.id} className="flex items-center gap-3 p-3 rounded-xl border border-border bg-background">
+                  <motion.div
+                    key={t.id}
+                    layout
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, x: -8 }}
+                    whileHover={{ borderColor: "rgba(139, 92, 246, 0.18)" }}
+                    transition={spring}
+                    className="flex items-center gap-3 p-3 rounded-xl border border-border bg-background"
+                  >
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{t.name}</p>
                       <p className="text-[11px] text-muted-foreground">
@@ -191,16 +276,24 @@ export default function ApiTokensModal({ workspaceId, onClose }: Props) {
                         {t.expiresAt && ` · 만료: ${formatKstDateTime(t.expiresAt).slice(0, 10)}`}
                       </p>
                     </div>
-                    <button onClick={() => handleDelete(t)} className="p-1.5 rounded hover:bg-red-500/10 hover:text-red-500 text-muted-foreground" aria-label="삭제">
+                    <motion.button
+                      whileHover={{ y: -1 }}
+                      whileTap={{ scale: 0.92 }}
+                      transition={spring}
+                      onClick={() => handleDelete(t)}
+                      className="p-1.5 rounded hover:bg-red-500/10 hover:text-red-500 text-muted-foreground transition-colors"
+                      aria-label="삭제"
+                    >
                       <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                    </motion.button>
+                  </motion.div>
                 ))}
+                </AnimatePresence>
               </div>
             )}
           </div>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

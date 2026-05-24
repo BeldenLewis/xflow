@@ -1,8 +1,11 @@
 "use client";
 
 import { useState, type Dispatch, type SetStateAction } from "react";
+import { motion } from "framer-motion";
 import { GripVertical, Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
 type FieldType = "text" | "email" | "tel" | "select" | "checkbox";
 
@@ -96,7 +99,7 @@ function FieldEditor({
               <input
                 value={field.label}
                 onChange={(e) => patch({ label: e.target.value })}
-                className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+                className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400 transition-colors"
               />
             </div>
             <div className="col-span-12 sm:col-span-3">
@@ -162,12 +165,15 @@ function FieldEditor({
         </div>
 
         {!field.system && (
-          <button
+          <motion.button
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.92 }}
+            transition={spring}
             onClick={onRemove}
             className="p-1.5 rounded-lg hover:bg-red-500/10 hover:text-red-500 text-muted-foreground transition-colors"
           >
             <Trash2 className="w-3.5 h-3.5" />
-          </button>
+          </motion.button>
         )}
       </div>
     </div>
@@ -312,12 +318,15 @@ export default function RegistrationFormTab({ webinar, onUpdate }: { webinar: We
             배너 사전등록 모달과 라이브 페이지 등록 폼이 이 설정을 사용합니다.
           </p>
         </div>
-        <button
+        <motion.button
+          whileHover={{ y: -1 }}
+          whileTap={{ scale: 0.96 }}
+          transition={spring}
           onClick={addCustomField}
           className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-violet-500 text-white text-xs font-medium hover:bg-violet-600 transition-colors shrink-0"
         >
           <Plus className="w-3.5 h-3.5" />커스텀 필드
-        </button>
+        </motion.button>
       </div>
 
       <div className="space-y-2">
@@ -339,7 +348,7 @@ export default function RegistrationFormTab({ webinar, onUpdate }: { webinar: We
             <input
               value={privacyText}
               onChange={(e) => setPrivacyText(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400 transition-colors"
             />
           </div>
           <div>
@@ -347,7 +356,7 @@ export default function RegistrationFormTab({ webinar, onUpdate }: { webinar: We
             <input
               value={marketingText}
               onChange={(e) => setMarketingText(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400 transition-colors"
             />
           </div>
           <div>
@@ -355,20 +364,23 @@ export default function RegistrationFormTab({ webinar, onUpdate }: { webinar: We
             <input
               value={submitLabel}
               onChange={(e) => setSubmitLabel(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+              className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400 transition-colors"
             />
           </div>
         </div>
       </section>
 
-      <button
+      <motion.button
+        whileHover={{ y: -1 }}
+        whileTap={{ scale: 0.97 }}
+        transition={spring}
         onClick={handleSave}
         disabled={isSaving}
         className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
       >
         <Save className="w-4 h-4" />
         {isSaving ? "저장 중..." : "등록 폼 저장"}
-      </button>
+      </motion.button>
       </div>
 
       <RegistrationFormPreview

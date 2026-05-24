@@ -1,8 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Sparkles, X } from "lucide-react";
 import { CHANGELOG } from "@/data/changelog";
+
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
 const STORAGE_KEY = "mach_changelog_seen_v";
 const LEGACY_STORAGE_KEY = "x" + "flow_changelog_seen_v";
@@ -42,7 +45,10 @@ export default function WhatsNewPanel() {
 
   return (
     <>
-      <button
+      <motion.button
+        whileHover={{ y: -1 }}
+        whileTap={{ scale: 0.92 }}
+        transition={spring}
         onClick={handleOpen}
         className="relative p-2 rounded-xl hover:bg-secondary transition-colors text-muted-foreground"
         aria-label="최근 업데이트"
@@ -50,20 +56,49 @@ export default function WhatsNewPanel() {
       >
         <Sparkles className="w-4 h-4" />
         {hasNew && (
-          <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-violet-500" />
+          <motion.span
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={spring}
+            className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-violet-500"
+          />
         )}
-      </button>
+      </motion.button>
+      <AnimatePresence>
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setOpen(false)}>
-          <div className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-xl max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="최근 업데이트">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={() => setOpen(false)}
+        >
+          <motion.div
+            initial={{ opacity: 0, y: 8, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.97 }}
+            transition={spring}
+            className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-xl max-h-[80vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="최근 업데이트"
+          >
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-violet-500" />
                 <h2 className="text-sm font-semibold">최근 업데이트</h2>
               </div>
-              <button onClick={() => setOpen(false)} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground" aria-label="닫기">
+              <motion.button
+                whileHover={{ rotate: 90 }}
+                whileTap={{ scale: 0.9 }}
+                transition={spring}
+                onClick={() => setOpen(false)}
+                className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground transition-colors"
+                aria-label="닫기"
+              >
                 <X className="w-4 h-4" />
-              </button>
+              </motion.button>
             </div>
             <div className="flex-1 overflow-y-auto p-5 space-y-5">
               {CHANGELOG.map((entry, i) => (
@@ -92,9 +127,10 @@ export default function WhatsNewPanel() {
                 </div>
               ))}
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
+      </AnimatePresence>
     </>
   );
 }

@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ElementType } from "react";
+import { motion } from "framer-motion";
 import { Activity, HelpCircle, Loader2, RefreshCw, TrendingUp, UserCheck, Users } from "lucide-react";
+
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
 interface Summary {
   totalRegistered: number;
@@ -60,7 +63,11 @@ function StatCard({
   meta: string;
 }) {
   return (
-    <div className="rounded-2xl border border-border bg-background p-4">
+    <motion.div
+      whileHover={{ borderColor: "rgba(139, 92, 246, 0.18)" }}
+      transition={spring}
+      className="rounded-2xl border border-border bg-background p-4"
+    >
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs font-medium text-muted-foreground">{label}</p>
         <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-violet-500/10 text-violet-500">
@@ -69,7 +76,7 @@ function StatCard({
       </div>
       <p className="mt-3 text-2xl font-semibold tabular-nums">{value}</p>
       <p className="mt-1 text-xs text-muted-foreground">{meta}</p>
-    </div>
+    </motion.div>
   );
 }
 
@@ -131,14 +138,17 @@ export default function AnalyticsTab({ webinarId }: { webinarId: string }) {
             등록부터 입장, 체류, 질문까지 핵심 전환만 간결하게 봅니다.
           </p>
         </div>
-        <button
+        <motion.button
+          whileHover={{ y: -1 }}
+          whileTap={{ scale: 0.96 }}
+          transition={spring}
           onClick={() => fetchAnalytics(true)}
           disabled={isRefreshing}
           className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border text-xs hover:bg-secondary transition-colors disabled:opacity-50"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
           새로고침
-        </button>
+        </motion.button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">

@@ -4,6 +4,8 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
+
 interface Theme {
   accentColor: string;
   bgColor: string;
@@ -104,7 +106,10 @@ export default function ThemeTab({ webinar, onUpdate }: { webinar: Webinar; onUp
         <h3 className="text-sm font-semibold">폰트</h3>
         <div className="flex flex-wrap gap-2">
           {FONTS.map((font) => (
-            <button
+            <motion.button
+              whileHover={{ y: -1 }}
+              whileTap={{ scale: 0.96 }}
+              transition={spring}
               key={font}
               onClick={() => setTheme((t) => ({ ...t, font }))}
               className={`px-3 py-2 rounded-xl border text-sm transition-colors ${
@@ -115,7 +120,7 @@ export default function ThemeTab({ webinar, onUpdate }: { webinar: Webinar; onUp
               style={{ fontFamily: font }}
             >
               {font}
-            </button>
+            </motion.button>
           ))}
         </div>
       </section>
@@ -148,7 +153,10 @@ export default function ThemeTab({ webinar, onUpdate }: { webinar: Webinar; onUp
               <h3 className="text-sm font-semibold">테두리 둥글기</h3>
               <div className="flex gap-2">
                 {RADIUS_OPTIONS.map(({ value, label }) => (
-                  <button
+                  <motion.button
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.96 }}
+                    transition={spring}
                     key={value}
                     onClick={() => setTheme((t) => ({ ...t, borderRadius: value }))}
                     className={`px-3 py-2 rounded-xl border text-sm transition-colors ${
@@ -158,7 +166,7 @@ export default function ThemeTab({ webinar, onUpdate }: { webinar: Webinar; onUp
                     }`}
                   >
                     {label}
-                  </button>
+                  </motion.button>
                 ))}
               </div>
             </section>
@@ -168,7 +176,10 @@ export default function ThemeTab({ webinar, onUpdate }: { webinar: Webinar; onUp
               <h3 className="text-sm font-semibold">배경 효과</h3>
               <div className="flex flex-wrap gap-2">
                 {BG_EFFECTS.map(({ value, label }) => (
-                  <button
+                  <motion.button
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.96 }}
+                    transition={spring}
                     key={value}
                     onClick={() => setTheme((t) => ({ ...t, bgEffect: value }))}
                     className={`px-3 py-2 rounded-xl border text-sm transition-colors ${
@@ -178,7 +189,7 @@ export default function ThemeTab({ webinar, onUpdate }: { webinar: Webinar; onUp
                     }`}
                   >
                     {label}
-                  </button>
+                  </motion.button>
                 ))}
               </div>
             </section>
@@ -214,13 +225,16 @@ export default function ThemeTab({ webinar, onUpdate }: { webinar: Webinar; onUp
         </div>
       </section>
 
-      <button
+      <motion.button
+        whileHover={{ y: -1 }}
+        whileTap={{ scale: 0.97 }}
+        transition={spring}
         onClick={handleSave}
         disabled={isSaving}
         className="px-5 py-2.5 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
       >
         {isSaving ? "저장 중..." : "테마 저장"}
-      </button>
+      </motion.button>
     </div>
   );
 }

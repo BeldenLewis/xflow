@@ -82,10 +82,10 @@ export function ProfileSettingsModal({ open, onClose }: Props) {
                   <h2 className="text-base font-semibold">프로필</h2>
                   <p className="text-xs text-muted-foreground mt-0.5">내 계정 정보를 관리해요</p>
                 </div>
-                <button onClick={onClose}
+                <motion.button whileHover={{ rotate: 90 }} whileTap={{ scale: 0.9 }} onClick={onClose}
                   className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
                   <X className="w-4 h-4" />
-                </button>
+                </motion.button>
               </div>
 
               <div className="mx-6 h-px bg-border" />
@@ -119,18 +119,18 @@ export function ProfileSettingsModal({ open, onClose }: Props) {
                         className="p-2 rounded-xl bg-violet-500 text-white hover:bg-violet-600 transition-colors disabled:opacity-40">
                         <Check className="w-4 h-4" />
                       </motion.button>
-                      <button onClick={() => setIsEditingName(false)}
+                      <motion.button whileTap={{ scale: 0.95 }} onClick={() => setIsEditingName(false)}
                         className="p-2 rounded-xl border border-border hover:bg-secondary transition-colors">
                         <X className="w-4 h-4" />
-                      </button>
+                      </motion.button>
                     </div>
                   ) : (
                     <div className="flex items-center gap-2">
                       <span className="flex-1 text-sm">{profileName || <span className="text-muted-foreground">이름을 입력해주세요</span>}</span>
-                      <button onClick={() => { setEditingName(profileName); setIsEditingName(true); }}
+                      <motion.button whileHover={{ y: -1 }} whileTap={{ scale: 0.96 }} onClick={() => { setEditingName(profileName); setIsEditingName(true); }}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border text-xs hover:bg-secondary transition-colors text-muted-foreground">
                         <Edit2 className="w-3 h-3" />편집
-                      </button>
+                      </motion.button>
                     </div>
                   )}
                 </div>

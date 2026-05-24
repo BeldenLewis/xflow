@@ -1,8 +1,11 @@
 "use client";
 
 import { useState, type Dispatch, type SetStateAction } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Clock, Edit3, Loader2, Plus, Save, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
+
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
 interface WebinarSession {
   id: string;
@@ -59,7 +62,7 @@ function SessionFormFields({
           min={1}
           value={form.number}
           onChange={(e) => setForm((f) => ({ ...f, number: e.target.value }))}
-          className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+          className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400 transition-colors"
         />
       </div>
       <div className="col-span-9 sm:col-span-10">
@@ -69,7 +72,7 @@ function SessionFormFields({
           value={form.title}
           onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
           placeholder="예: AI 기반 데이터 분석 플랫폼의 혁신"
-          className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+          className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400 transition-colors"
         />
       </div>
       <div className="col-span-12 sm:col-span-4">
@@ -79,7 +82,7 @@ function SessionFormFields({
           value={form.speaker}
           onChange={(e) => setForm((f) => ({ ...f, speaker: e.target.value }))}
           placeholder="홍길동 | 회사명"
-          className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+          className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400 transition-colors"
         />
       </div>
       <div className="col-span-6 sm:col-span-2">
@@ -88,7 +91,7 @@ function SessionFormFields({
           type="time"
           value={form.startTime}
           onChange={(e) => setForm((f) => ({ ...f, startTime: e.target.value }))}
-          className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+          className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400 transition-colors"
         />
       </div>
       <div className="col-span-6 sm:col-span-2">
@@ -97,7 +100,7 @@ function SessionFormFields({
           type="time"
           value={form.endTime}
           onChange={(e) => setForm((f) => ({ ...f, endTime: e.target.value }))}
-          className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+          className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400 transition-colors"
         />
       </div>
       <div className="col-span-12 sm:col-span-4">
@@ -107,7 +110,7 @@ function SessionFormFields({
           value={form.description}
           onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
           placeholder="선택 입력"
-          className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+          className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400 transition-colors"
         />
       </div>
     </div>
@@ -223,7 +226,10 @@ export default function SessionsTab({
         <p className="text-sm text-muted-foreground">
           라이브 페이지와 임베드 코드에 표시될 세션 아젠다를 관리해요
         </p>
-        <button
+        <motion.button
+          whileHover={{ y: -1 }}
+          whileTap={{ scale: 0.96 }}
+          transition={spring}
           onClick={() => {
             setEditingId(null);
             setCreateForm({ ...emptyForm, number: String((sortedSessions.at(-1)?.number ?? 0) + 1) });
@@ -232,30 +238,46 @@ export default function SessionsTab({
           className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-violet-500 text-white text-xs font-medium hover:bg-violet-600 transition-colors shrink-0"
         >
           <Plus className="w-3.5 h-3.5" />세션 추가
-        </button>
+        </motion.button>
       </div>
 
+      <AnimatePresence initial={false}>
       {showCreate && (
-        <div className="p-4 rounded-2xl border border-violet-400/30 bg-violet-500/5 space-y-3">
-          <SessionFormFields form={createForm} setForm={setCreateForm} />
-          <div className="flex gap-2">
-            <button
-              onClick={handleCreate}
-              disabled={isSaving}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
-            >
-              {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-              추가
-            </button>
-            <button
-              onClick={resetCreate}
-              className="px-4 py-2 rounded-xl border border-border text-sm hover:bg-secondary transition-colors"
-            >
-              취소
-            </button>
+        <motion.div
+          initial={{ opacity: 0, y: -4, height: 0 }}
+          animate={{ opacity: 1, y: 0, height: "auto" }}
+          exit={{ opacity: 0, y: -4, height: 0 }}
+          transition={spring}
+          className="overflow-hidden"
+        >
+          <div className="p-4 rounded-2xl border border-violet-400/30 bg-violet-500/5 space-y-3">
+            <SessionFormFields form={createForm} setForm={setCreateForm} />
+            <div className="flex gap-2">
+              <motion.button
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.96 }}
+                transition={spring}
+                onClick={handleCreate}
+                disabled={isSaving}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
+              >
+                {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                추가
+              </motion.button>
+              <motion.button
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.96 }}
+                transition={spring}
+                onClick={resetCreate}
+                className="px-4 py-2 rounded-xl border border-border text-sm hover:bg-secondary transition-colors"
+              >
+                취소
+              </motion.button>
+            </div>
           </div>
-        </div>
+        </motion.div>
       )}
+      </AnimatePresence>
 
       {sortedSessions.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -265,26 +287,42 @@ export default function SessionsTab({
         </div>
       ) : (
         <div className="space-y-2">
+          <AnimatePresence initial={false}>
           {sortedSessions.map((session) => (
-            <div key={session.id} className="p-4 rounded-2xl border border-border bg-background">
+            <motion.div
+              key={session.id}
+              layout
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, x: -8 }}
+              whileHover={editingId === session.id ? undefined : { borderColor: "rgba(139, 92, 246, 0.18)" }}
+              transition={spring}
+              className="p-4 rounded-2xl border border-border bg-background"
+            >
               {editingId === session.id ? (
                 <div className="space-y-3">
                   <SessionFormFields form={editForm} setForm={setEditForm} />
                   <div className="flex gap-2">
-                    <button
+                    <motion.button
+                      whileHover={{ y: -1 }}
+                      whileTap={{ scale: 0.96 }}
+                      transition={spring}
                       onClick={() => handleUpdate(session.id)}
                       disabled={isSaving}
                       className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
                     >
                       {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                       저장
-                    </button>
-                    <button
+                    </motion.button>
+                    <motion.button
+                      whileHover={{ y: -1 }}
+                      whileTap={{ scale: 0.96 }}
+                      transition={spring}
                       onClick={() => setEditingId(null)}
                       className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-border text-sm hover:bg-secondary transition-colors"
                     >
                       <X className="w-3.5 h-3.5" />취소
-                    </button>
+                    </motion.button>
                   </div>
                 </div>
               ) : (
@@ -303,25 +341,32 @@ export default function SessionsTab({
                     {session.description && <p className="text-xs text-muted-foreground mt-1.5">{session.description}</p>}
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <button
+                    <motion.button
+                      whileHover={{ y: -1 }}
+                      whileTap={{ scale: 0.92 }}
+                      transition={spring}
                       onClick={() => startEdit(session)}
                       className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
                       title="수정"
                     >
                       <Edit3 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
+                    </motion.button>
+                    <motion.button
+                      whileHover={{ y: -1 }}
+                      whileTap={{ scale: 0.92 }}
+                      transition={spring}
                       onClick={() => handleDelete(session.id)}
                       className="p-1.5 rounded-lg hover:bg-red-500/10 hover:text-red-500 text-muted-foreground transition-colors"
                       title="삭제"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    </motion.button>
                   </div>
                 </div>
               )}
-            </div>
+            </motion.div>
           ))}
+          </AnimatePresence>
         </div>
       )}
     </div>

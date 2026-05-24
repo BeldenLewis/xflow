@@ -1,8 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { motion } from "framer-motion";
 import { X, Loader2, AlertTriangle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
 interface Props {
   sourceId: string;
@@ -43,8 +46,19 @@ export default function DangerDeleteModal({ sourceId, sourceName, recordCount, o
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
-      <div
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 8, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 8, scale: 0.97 }}
+        transition={spring}
         className="bg-background border-2 border-red-500/40 rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
@@ -53,9 +67,15 @@ export default function DangerDeleteModal({ sourceId, sourceName, recordCount, o
             <AlertTriangle className="w-4 h-4 text-red-500" />
             <h2 className="text-sm font-semibold text-red-600 dark:text-red-400">모든 레코드 삭제 — 위험</h2>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground">
+          <motion.button
+            whileHover={{ rotate: 90 }}
+            whileTap={{ scale: 0.9 }}
+            transition={spring}
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground transition-colors"
+          >
             <X className="w-4 h-4" />
-          </button>
+          </motion.button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
@@ -118,22 +138,28 @@ export default function DangerDeleteModal({ sourceId, sourceName, recordCount, o
         </div>
 
         <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-secondary/30">
-          <button
+          <motion.button
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.96 }}
+            transition={spring}
             onClick={onClose}
             className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
             취소
-          </button>
-          <button
+          </motion.button>
+          <motion.button
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.96 }}
+            transition={spring}
             onClick={handleDelete}
             disabled={!canDelete || deleting}
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           >
             {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
             {deleting ? "삭제 중..." : `${recordCount.toLocaleString()}건 영구 삭제`}
-          </button>
+          </motion.button>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

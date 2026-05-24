@@ -3,8 +3,11 @@
 import { Activity, CalendarDays, Clock3, TrendingUp, Users } from "lucide-react";
 import type { ElementType } from "react";
 import { useState } from "react";
+import { motion } from "framer-motion";
 import { Area, AreaChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatKstDateTime } from "@/lib/datetime";
+
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
 interface MetricChange {
   rangeChange: number | null;
@@ -230,18 +233,28 @@ function UtmTrendChart({ trend }: { trend: RealtimeReportData["dailyUtmTrend"] }
           </div>
           <p className="mt-0.5 text-xs text-muted-foreground">UTM 기준 상위 5개 경로의 일별 등록 흐름입니다.</p>
         </div>
-        <div className="grid h-8 grid-cols-3 rounded-xl border border-border bg-secondary/30 p-0.5 shrink-0">
-          {(["source", "medium", "combined"] as const).map((t, i) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`rounded-lg px-2.5 text-xs font-medium transition-colors ${
-                tab === t ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {["소스", "매체", "소스/매체"][i]}
-            </button>
-          ))}
+        <div className="relative grid h-8 grid-cols-3 rounded-xl border border-border bg-secondary/30 p-0.5 shrink-0">
+          {(["source", "medium", "combined"] as const).map((t, i) => {
+            const active = tab === t;
+            return (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`relative z-10 rounded-lg px-2.5 text-xs font-medium transition-colors ${
+                  active ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {active && (
+                  <motion.span
+                    layoutId="utm-trend-pill"
+                    transition={spring}
+                    className="absolute inset-0 -z-10 rounded-lg bg-background shadow-sm"
+                  />
+                )}
+                {["소스", "매체", "소스/매체"][i]}
+              </button>
+            );
+          })}
         </div>
       </div>
       {hasData ? (
@@ -320,20 +333,28 @@ function UtmBreakdownSection({ data }: { data: RealtimeReportData }) {
           <TrendingUp className="w-4 h-4 text-violet-500" />
           <h3 className="text-sm font-semibold">유입 경로</h3>
         </div>
-        <div className="grid h-8 grid-cols-3 rounded-xl border border-border bg-secondary/30 p-0.5">
-          {UTM_TABS.map((t) => (
-            <button
-              key={t.value}
-              onClick={() => setTab(t.value)}
-              className={`relative rounded-lg px-3 text-xs font-medium transition-colors ${
-                tab === t.value
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+        <div className="relative grid h-8 grid-cols-3 rounded-xl border border-border bg-secondary/30 p-0.5">
+          {UTM_TABS.map((t) => {
+            const active = tab === t.value;
+            return (
+              <button
+                key={t.value}
+                onClick={() => setTab(t.value)}
+                className={`relative z-10 rounded-lg px-3 text-xs font-medium transition-colors ${
+                  active ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {active && (
+                  <motion.span
+                    layoutId="utm-breakdown-pill"
+                    transition={spring}
+                    className="absolute inset-0 -z-10 rounded-lg bg-background shadow-sm"
+                  />
+                )}
+                {t.label}
+              </button>
+            );
+          })}
         </div>
       </div>
       {items.length > 0 ? (

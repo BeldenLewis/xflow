@@ -1,11 +1,14 @@
 "use client";
 
 import { useState, useEffect, useMemo, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { motion } from "framer-motion";
 import {
   Copy, Check, Code2, Monitor, Smartphone, ExternalLink,
   FileCode, ChevronDown, GripVertical,
 } from "lucide-react";
 import { toast } from "sonner";
+
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
 interface WebinarSession {
   id: string; number: number; title: string; speaker: string | null;
@@ -100,15 +103,21 @@ function Fld({ label, children }: { label: string; children: ReactNode }) {
 function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
     <div className="flex items-center gap-3 rounded-lg px-0.5 py-1.5 select-none">
-      <button
+      <motion.button
+        whileTap={{ scale: 0.94 }}
+        transition={spring}
         type="button"
         role="switch"
         aria-checked={checked}
         onClick={() => onChange(!checked)}
         className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-violet-500/30 ${checked ? "bg-violet-500" : "bg-secondary border border-border"}`}
       >
-        <span className={`block h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${checked ? "translate-x-5" : "translate-x-0"}`} />
-      </button>
+        <motion.span
+          layout
+          transition={spring}
+          className={`block h-5 w-5 rounded-full bg-white shadow-sm ${checked ? "translate-x-5" : "translate-x-0"}`}
+        />
+      </motion.button>
       <button
         type="button"
         onClick={() => onChange(!checked)}

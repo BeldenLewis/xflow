@@ -1,8 +1,11 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Calendar, ChevronDown } from "lucide-react";
 import { kstDateString } from "@/lib/datetime";
+
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
 export interface DateRange {
   from: Date;
@@ -57,19 +60,32 @@ export default function DateRangePicker({ value, onChange }: Props) {
 
   return (
     <div ref={dropRef} className="relative">
-      <button
+      <motion.button
+        whileHover={{ y: -1 }}
+        whileTap={{ scale: 0.96 }}
+        transition={spring}
         onClick={() => setOpen((o) => !o)}
         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border bg-background text-xs hover:bg-secondary transition-colors"
       >
         <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
         <span>{value.label}</span>
         <ChevronDown className="w-3 h-3 text-muted-foreground" />
-      </button>
+      </motion.button>
+      <AnimatePresence>
       {open && (
-        <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-border bg-card shadow-xl z-20 p-3 space-y-2">
+        <motion.div
+          initial={{ opacity: 0, y: -4, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -4, scale: 0.98 }}
+          transition={spring}
+          className="absolute right-0 mt-2 w-72 rounded-2xl border border-border bg-card shadow-xl z-20 p-3 space-y-2 origin-top-right"
+        >
           <div className="space-y-1">
             {presets().map((p) => (
-              <button
+              <motion.button
+                whileHover={{ x: 2 }}
+                whileTap={{ scale: 0.98 }}
+                transition={spring}
                 key={p.label}
                 onClick={() => { onChange(p); setOpen(false); }}
                 className={`w-full text-left px-3 py-1.5 rounded-lg text-xs transition-colors ${
@@ -77,7 +93,7 @@ export default function DateRangePicker({ value, onChange }: Props) {
                 }`}
               >
                 {p.label}
-              </button>
+              </motion.button>
             ))}
           </div>
           <div className="border-t border-border pt-2 space-y-2">
@@ -87,25 +103,29 @@ export default function DateRangePicker({ value, onChange }: Props) {
                 type="date"
                 value={customFrom}
                 onChange={(e) => setCustomFrom(e.target.value)}
-                className="flex-1 px-2 py-1 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+                className="flex-1 px-2 py-1 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400 transition-colors"
               />
               <span className="text-xs text-muted-foreground">~</span>
               <input
                 type="date"
                 value={customTo}
                 onChange={(e) => setCustomTo(e.target.value)}
-                className="flex-1 px-2 py-1 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+                className="flex-1 px-2 py-1 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400 transition-colors"
               />
             </div>
-            <button
+            <motion.button
+              whileHover={{ y: -1 }}
+              whileTap={{ scale: 0.97 }}
+              transition={spring}
               onClick={applyCustom}
               className="w-full py-1.5 rounded-lg bg-violet-500 text-white text-xs font-medium hover:bg-violet-600 transition-colors"
             >
               적용
-            </button>
+            </motion.button>
           </div>
-        </div>
+        </motion.div>
       )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -507,7 +507,7 @@ export async function POST(request: Request) {
   const baseParams = { workspaceId, projectId, filters };
   const rangeWhere = buildWhere({ ...baseParams, from, to });
 
-  const [yesterdayCount, todayCount, cumulativeCount, rangeCount, previousRangeCount, cumulativeBeforeRange, rangeRecords, heatmapRecords, utmGroups, sourceFields] = await Promise.all([
+  const [yesterdayCount, todayCount, cumulativeCount, rangeCount, previousRangeCount, cumulativeBeforeRange, heatmapRecords, utmGroups, sourceFields] = await Promise.all([
     prisma.collectRecord.count({ where: buildWhere({ ...baseParams, from: yesterdayStart, lt: todayStart }) }),
     prisma.collectRecord.count({ where: buildWhere({ ...baseParams, from: todayStart, to: now }) }),
     prisma.collectRecord.count({ where: buildWhere(baseParams) }),
@@ -516,13 +516,7 @@ export async function POST(request: Request) {
     prisma.collectRecord.count({ where: buildWhere({ ...baseParams, lt: from }) }),
     prisma.collectRecord.findMany({
       where: rangeWhere,
-      select: { sourceId: true, data: true },
-      orderBy: { createdAt: "desc" },
-      take: 5000,
-    }),
-    prisma.collectRecord.findMany({
-      where: rangeWhere,
-      select: { createdAt: true, data: true, utmSource: true, utmMedium: true, firstUtmSource: true, firstUtmMedium: true },
+      select: { sourceId: true, createdAt: true, data: true, utmSource: true, utmMedium: true, firstUtmSource: true, firstUtmMedium: true },
       orderBy: { createdAt: "asc" },
       take: 50000,
     }),
@@ -551,7 +545,7 @@ export async function POST(request: Request) {
   const fieldAliasesBySource = buildFieldAliasLookup(sourceFields);
   const composition = VISITOR_DIMENSIONS.map((dimension) => {
     const counts = new Map<string, number>();
-    for (const record of rangeRecords as CompositionRecord[]) {
+    for (const record of heatmapRecords as unknown as CompositionRecord[]) {
       const fieldAliases = fieldAliasesBySource.get(record.sourceId) ?? [];
       for (const value of pickValue(record.data, dimension.candidates, fieldAliases)) {
         counts.set(value, (counts.get(value) ?? 0) + 1);
@@ -563,7 +557,7 @@ export async function POST(request: Request) {
 
   // Email domain TOP 10
   const emailDomainCounts = new Map<string, number>();
-  for (const record of rangeRecords as CompositionRecord[]) {
+  for (const record of heatmapRecords as unknown as CompositionRecord[]) {
     const fieldAliases = fieldAliasesBySource.get(record.sourceId) ?? [];
     const emails = pickValue(record.data, EMAIL_FIELD_CANDIDATES, fieldAliases);
     for (const email of emails) {
@@ -588,7 +582,7 @@ export async function POST(request: Request) {
   // Unique vs duplicate email (within range)
   const emailSeen = new Map<string, number>();
   let recordsWithEmail = 0;
-  for (const record of rangeRecords as CompositionRecord[]) {
+  for (const record of heatmapRecords as unknown as CompositionRecord[]) {
     const fieldAliases = fieldAliasesBySource.get(record.sourceId) ?? [];
     const emails = pickValue(record.data, EMAIL_FIELD_CANDIDATES, fieldAliases);
     if (emails.length === 0) continue;

@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { X, Loader2, Search, Trash2, AlertTriangle, ShieldAlert } from "lucide-react";
+import { Loader2, Search, Trash2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { formatKstDateTime } from "@/lib/datetime";
+import ModalShell from "./ModalShell";
 
 const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
@@ -54,41 +55,8 @@ export default function GdprModal({ sourceId, onClose, onChanged }: Props) {
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.15 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ opacity: 0, y: 8, scale: 0.97 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 8, scale: 0.97 }}
-        transition={spring}
-        className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label="개인정보 처리"
-      >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="w-4 h-4 text-amber-500" />
-            <h2 className="text-sm font-semibold">개인정보 검색 · 삭제 (GDPR)</h2>
-          </div>
-          <motion.button
-            whileHover={{ rotate: 90 }}
-            whileTap={{ scale: 0.9 }}
-            transition={spring}
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground transition-colors"
-            aria-label="닫기"
-          >
-            <X className="w-4 h-4" />
-          </motion.button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+    <ModalShell open onClose={onClose} title="개인정보 검색 · 삭제 (GDPR)" size="md">
+      <div className="space-y-4">
           <p className="text-xs text-muted-foreground">
             특정 사용자의 개인정보(이메일, 전화번호 등) 검색 → 일괄 삭제. <b>right-to-erasure</b> 요청 대응용.
           </p>
@@ -160,8 +128,7 @@ export default function GdprModal({ sourceId, onClose, onChanged }: Props) {
             </motion.div>
           )}
           </AnimatePresence>
-        </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </ModalShell>
   );
 }

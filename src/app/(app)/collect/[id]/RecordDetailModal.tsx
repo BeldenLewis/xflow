@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { X, Loader2, Check, Edit2, Save, Trash2 } from "lucide-react";
+import { Loader2, Check, Edit2, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { formatKstDateTime } from "@/lib/datetime";
+import ModalShell from "./ModalShell";
 
 const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
@@ -109,79 +110,78 @@ export default function RecordDetailModal({ sourceId, recordId, fieldMappings, o
     onClose();
   };
 
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.15 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ opacity: 0, y: 8, scale: 0.97 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 8, scale: 0.97 }}
+  const headerExtra = !loading && record ? (
+    <>
+      {editing ? (
+        <motion.button
+          whileHover={{ y: -1 }}
+          whileTap={{ scale: 0.96 }}
+          transition={spring}
+          onClick={handleSave}
+          disabled={saving}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-500 text-white text-xs font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
+        >
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+          저장
+        </motion.button>
+      ) : (
+        <motion.button
+          whileHover={{ y: -1 }}
+          whileTap={{ scale: 0.96 }}
+          transition={spring}
+          onClick={() => setEditing(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium hover:bg-secondary transition-colors"
+        >
+          <Edit2 className="w-3.5 h-3.5" />편집
+        </motion.button>
+      )}
+      <motion.button
+        whileHover={{ y: -1 }}
+        whileTap={{ scale: 0.92 }}
         transition={spring}
-        className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
+        onClick={handleDelete}
+        className="p-1.5 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors"
+        title="삭제"
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <div>
-            <h2 className="text-sm font-semibold">레코드 상세</h2>
-            {record && <p className="text-[11px] text-muted-foreground mt-0.5">{formatKstDateTime(record.createdAt)} KST · {record.id}</p>}
-          </div>
-          <div className="flex items-center gap-1">
-            {!loading && record && (
-              <>
-                {editing ? (
-                  <motion.button
-                    whileHover={{ y: -1 }}
-                    whileTap={{ scale: 0.96 }}
-                    transition={spring}
-                    onClick={handleSave}
-                    disabled={saving}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-500 text-white text-xs font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
-                  >
-                    {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                    저장
-                  </motion.button>
-                ) : (
-                  <motion.button
-                    whileHover={{ y: -1 }}
-                    whileTap={{ scale: 0.96 }}
-                    transition={spring}
-                    onClick={() => setEditing(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium hover:bg-secondary transition-colors"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />편집
-                  </motion.button>
-                )}
-                <motion.button
-                  whileHover={{ y: -1 }}
-                  whileTap={{ scale: 0.92 }}
-                  transition={spring}
-                  onClick={handleDelete}
-                  className="p-1.5 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors"
-                  title="삭제"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </motion.button>
-              </>
-            )}
-            <motion.button
-              whileHover={{ rotate: 90 }}
-              whileTap={{ scale: 0.9 }}
-              transition={spring}
-              onClick={onClose}
-              className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </motion.button>
-          </div>
-        </div>
+        <Trash2 className="w-3.5 h-3.5" />
+      </motion.button>
+    </>
+  ) : null;
 
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+  return (
+    <ModalShell
+      open
+      onClose={onClose}
+      title="레코드 상세"
+      description={record ? `${formatKstDateTime(record.createdAt)} KST · ${record.id}` : undefined}
+      size="md"
+      headerExtra={headerExtra}
+      footer={editing && !loading ? (
+        <>
+          <motion.button
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.96 }}
+            transition={spring}
+            onClick={() => { setEditing(false); if (record) { setDraft({ ...record.data }); } }}
+            className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            취소
+          </motion.button>
+          <motion.button
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.96 }}
+            transition={spring}
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
+          >
+            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+            저장
+          </motion.button>
+        </>
+      ) : null}
+    >
+      <div className="space-y-5">
           {loading ? (
             <div className="flex items-center justify-center py-16"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
           ) : record ? (
@@ -259,33 +259,7 @@ export default function RecordDetailModal({ sourceId, recordId, fieldMappings, o
               )}
             </>
           ) : null}
-        </div>
-
-        {editing && !loading && (
-          <div className="px-5 py-3 border-t border-border bg-secondary/30 flex items-center justify-end gap-2">
-            <motion.button
-              whileHover={{ y: -1 }}
-              whileTap={{ scale: 0.96 }}
-              transition={spring}
-              onClick={() => { setEditing(false); if (record) { setDraft({ ...record.data }); } }}
-              className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              취소
-            </motion.button>
-            <motion.button
-              whileHover={{ y: -1 }}
-              whileTap={{ scale: 0.96 }}
-              transition={spring}
-              onClick={handleSave}
-              disabled={saving}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
-            >
-              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-              저장
-            </motion.button>
-          </div>
-        )}
-      </motion.div>
-    </motion.div>
+      </div>
+    </ModalShell>
   );
 }

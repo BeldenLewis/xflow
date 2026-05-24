@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { X, Loader2, Check, Sparkles, AlertTriangle } from "lucide-react";
+import { Loader2, Check, Sparkles, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
+import ModalShell from "./ModalShell";
 
 const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
@@ -81,39 +82,22 @@ export default function NormalizeModal({ sourceId, fieldMappings, onClose, onApp
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.15 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ opacity: 0, y: 8, scale: 0.97 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 8, scale: 0.97 }}
-        transition={spring}
-        className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-amber-500" />
-            <h2 className="text-sm font-semibold">데이터 정규화</h2>
-          </div>
-          <motion.button
-            whileHover={{ rotate: 90 }}
-            whileTap={{ scale: 0.9 }}
-            transition={spring}
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </motion.button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+    <ModalShell open onClose={onClose} title="데이터 정규화" size="sm" footer={
+      preview && preview.changedRows > 0 ? (
+        <motion.button
+          whileHover={{ y: -1 }}
+          whileTap={{ scale: 0.96 }}
+          transition={spring}
+          onClick={handleApply}
+          disabled={applying}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
+        >
+          {applying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+          {applying ? "적용 중..." : `${preview.changedRows}건 정규화 적용`}
+        </motion.button>
+      ) : null
+    }>
+      <div className="space-y-4">
           <p className="text-xs text-muted-foreground">
             모든 레코드를 일괄 변환합니다. 이메일/휴대폰 컬럼은 필드 키와 라벨로 자동 식별돼요.
           </p>
@@ -180,24 +164,7 @@ export default function NormalizeModal({ sourceId, fieldMappings, onClose, onApp
             </motion.div>
           )}
           </AnimatePresence>
-        </div>
-
-        {preview && preview.changedRows > 0 && (
-          <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-secondary/30">
-            <motion.button
-              whileHover={{ y: -1 }}
-              whileTap={{ scale: 0.96 }}
-              transition={spring}
-              onClick={handleApply}
-              disabled={applying}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
-            >
-              {applying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-              {applying ? "적용 중..." : `${preview.changedRows}건 정규화 적용`}
-            </motion.button>
-          </div>
-        )}
-      </motion.div>
-    </motion.div>
+      </div>
+    </ModalShell>
   );
 }

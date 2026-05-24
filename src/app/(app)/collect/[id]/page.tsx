@@ -6,16 +6,17 @@ import { motion, AnimatePresence, Reorder } from "framer-motion";
 import {
   ArrowLeft, Database, Globe, Copy, Check, Plus, Trash2,
   GripVertical, Code2, Table2, Settings2, Loader2, RefreshCw,
-  ToggleLeft, ToggleRight, ExternalLink, Sparkles, ClipboardPaste,
+  ExternalLink, Sparkles, ClipboardPaste,
   Download, Upload, ArrowUp, ArrowDown, ChevronsUpDown, Wand2,
   ChevronLeft, ChevronRight, Search, Filter, Activity, Shield,
   RefreshCcw, Bell, Webhook, KeyRound, Eraser, AlertTriangle, ShieldAlert,
-  MoreHorizontal, Link2,
+  MoreHorizontal, Link2, Wrench, HardDriveDownload, Columns3,
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useWorkspace } from "@/contexts/workspace";
+import ActiveToggle from "@/app/(app)/collect/_components/ActiveToggle";
 import ImportModal from "./ImportModal";
 import CleanupModal from "./CleanupModal";
 import RecordDetailModal from "./RecordDetailModal";
@@ -25,6 +26,8 @@ import DangerDeleteModal from "./DangerDeleteModal";
 import GdprModal from "./GdprModal";
 import RetentionPolicyEditor from "./RetentionPolicyEditor";
 import { formatKst, formatKstDateTime } from "@/lib/datetime";
+
+const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
 type SortKind = "createdAt" | "field" | "utmSource" | "utmMedium";
 interface SortState {
@@ -90,10 +93,12 @@ interface ActivityLogEntry {
 
 const TABS = [
   { id: "records", label: "수집 데이터", icon: Table2 },
-  { id: "fields", label: "필드 설정", icon: Settings2 },
+  { id: "fields", label: "필드", icon: Settings2 },
   { id: "script", label: "스크립트", icon: Code2 },
-  { id: "settings", label: "보안/알림", icon: Shield },
-  { id: "activity", label: "활동 로그", icon: Activity },
+  { id: "install", label: "설치", icon: Wrench },
+  { id: "settings", label: "설정", icon: Shield },
+  { id: "data-mgmt", label: "데이터 관리", icon: HardDriveDownload },
+  { id: "activity", label: "활동", icon: Activity },
 ] as const;
 
 type Tab = typeof TABS[number]["id"];
@@ -161,8 +166,13 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
   const [showNormalize, setShowNormalize] = useState(false);
   const [showDeleteSelectedModal, setShowDeleteSelectedModal] = useState(false);
   const [showRegenerateKeyModal, setShowRegenerateKeyModal] = useState(false);
-  const [showCleaningMenu, setShowCleaningMenu] = useState(false);
-  const cleaningMenuRef = useRef<HTMLDivElement>(null);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const [showColumnsMenu, setShowColumnsMenu] = useState(false);
+  const columnsMenuRef = useRef<HTMLDivElement>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [showUtmSource, setShowUtmSource] = useState(true);
+  const [showUtmMedium, setShowUtmMedium] = useState(true);
   const [showTest, setShowTest] = useState(false);
   const [showDangerDelete, setShowDangerDelete] = useState(false);
   const [showGdpr, setShowGdpr] = useState(false);
@@ -437,16 +447,42 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
     }
   }, [tab, fetchActivity]);
 
-  // 데이터 정리 드롭다운 외부 클릭 닫기
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (cleaningMenuRef.current && !cleaningMenuRef.current.contains(e.target as Node)) {
-        setShowCleaningMenu(false);
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setShowMoreMenu(false);
       }
     };
-    if (showCleaningMenu) document.addEventListener("mousedown", handler);
+    if (showMoreMenu) document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [showCleaningMenu]);
+  }, [showMoreMenu]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (columnsMenuRef.current && !columnsMenuRef.current.contains(e.target as Node)) {
+        setShowColumnsMenu(false);
+      }
+    };
+    if (showColumnsMenu) document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showColumnsMenu]);
+
+  // 컬럼 표시 설정 localStorage 동기화
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(`collect-columns-${id}`);
+      if (raw) {
+        const v = JSON.parse(raw);
+        if (typeof v.showUtmSource === "boolean") setShowUtmSource(v.showUtmSource);
+        if (typeof v.showUtmMedium === "boolean") setShowUtmMedium(v.showUtmMedium);
+      }
+    } catch {}
+  }, [id]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(`collect-columns-${id}`, JSON.stringify({ showUtmSource, showUtmMedium }));
+    } catch {}
+  }, [id, showUtmSource, showUtmMedium]);
 
   const handleSaveSecuritySettings = async () => {
     setSavingSettings(true);
@@ -551,15 +587,30 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
     setSource((s) => s ? { ...s, successTrigger, redirectUrl: redirectUrl || null } : s);
   };
 
-  const handleToggle = async () => {
+  const handleToggleSilent = async (next: boolean) => {
     if (!source) return;
     const res = await fetch(`/api/collect-sources/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isActive: !source.isActive }),
+      body: JSON.stringify({ isActive: next }),
     });
     if (!res.ok) { toast.error("상태 변경 실패"); return; }
-    setSource((s) => s ? { ...s, isActive: !s.isActive } : s);
+    setSource((s) => s ? { ...s, isActive: next } : s);
+  };
+
+  const handleToggle = async (next: boolean) => {
+    if (!source) return;
+    const prev = source.isActive;
+    await handleToggleSilent(next);
+    if (prev && !next) {
+      toast("사전등록 폼이 비활성화됐어요", {
+        description: "새 데이터 수집이 중단됩니다",
+        duration: 5000,
+        action: { label: "되돌리기", onClick: () => handleToggleSilent(true) },
+      });
+    } else if (!prev && next) {
+      toast.success("사전등록 폼이 활성화됐어요");
+    }
   };
 
   // 감지된 필드 한 번에 적용
@@ -687,26 +738,20 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
               </div>
             </div>
           </div>
-          <button onClick={handleToggle} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border text-sm hover:bg-secondary transition-colors shrink-0">
-            {source.isActive
-              ? <><ToggleRight className="w-4 h-4 text-violet-500" /><span className="text-violet-500">활성</span></>
-              : <><ToggleLeft className="w-4 h-4 text-muted-foreground" /><span className="text-muted-foreground">비활성</span></>}
-          </button>
-        </div>
-
-        <div className="mt-4 flex items-center gap-2 px-3 py-2 rounded-xl bg-secondary border border-border">
-          <span className="text-xs text-muted-foreground font-mono shrink-0">API Key</span>
-          <span className="text-xs font-mono truncate flex-1">{source.apiKey}</span>
-          <CopyButton text={source.apiKey} />
+          <ActiveToggle active={source.isActive} onChange={(next) => handleToggle(next)} size="md" />
         </div>
       </div>
 
       {/* 탭 */}
       <div className="flex gap-1 border-b border-border overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {TABS.map(({ id: tabId, label, icon: Icon }) => (
+        {TABS.map(({ id: tabId, label, icon: Icon }) => {
+          const isDanger = tabId === "data-mgmt";
+          const activeColor = isDanger ? "border-red-500 text-red-500" : "border-violet-500 text-violet-500";
+          const idleColor = isDanger ? "border-transparent text-red-500/70 hover:text-red-500" : "border-transparent text-muted-foreground hover:text-foreground";
+          return (
           <button key={tabId} onClick={() => setTab(tabId)}
             className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-              tab === tabId ? "border-violet-500 text-violet-500" : "border-transparent text-muted-foreground hover:text-foreground"
+              tab === tabId ? activeColor : idleColor
             }`}
           >
             <Icon className="w-3.5 h-3.5" />{label}
@@ -716,7 +761,8 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
               </span>
             )}
           </button>
-        ))}
+          );
+        })}
       </div>
 
       <AnimatePresence mode="wait">
@@ -743,34 +789,98 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                       {isDeleting ? "삭제 중..." : `선택 삭제`}
                     </button>
                   )}
-                  <button
-                    onClick={() => setShowImport(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-violet-400/30 bg-violet-500/5 text-violet-500 text-xs font-medium hover:bg-violet-500/10 transition-colors"
+                  <motion.button
+                    whileHover={{ y: -1 }} whileTap={{ scale: 0.96 }} transition={spring}
+                    onClick={handleExportCsv}
+                    disabled={recordsTotal === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium hover:bg-secondary transition-colors disabled:opacity-40"
+                    title={hasActiveFilter || selectedIds.size > 0 ? "필터/선택된 결과만 내보냅니다" : "전체 데이터를 내보냅니다"}
                   >
-                    <Upload className="w-3.5 h-3.5" />엑셀/CSV 가져오기
-                  </button>
-                  {/* 데이터 정리 드롭다운 */}
-                  <div ref={cleaningMenuRef} className="relative">
-                    <button
-                      onClick={() => setShowCleaningMenu((v) => !v)}
-                      disabled={recordsTotal === 0}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium hover:bg-secondary transition-colors disabled:opacity-40"
+                    <Download className="w-3.5 h-3.5" />CSV 내보내기
+                  </motion.button>
+                  <motion.button
+                    whileTap={{ scale: 0.92 }} transition={spring}
+                    onClick={fetchRecords}
+                    className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </motion.button>
+                  {/* 컬럼 표시 */}
+                  <div ref={columnsMenuRef} className="relative">
+                    <motion.button
+                      whileTap={{ scale: 0.92 }} transition={spring}
+                      onClick={() => setShowColumnsMenu((v) => !v)}
+                      className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground"
+                      title="컬럼 표시"
                     >
-                      <Wand2 className="w-3.5 h-3.5" />데이터 정리
-                      <MoreHorizontal className="w-3 h-3 text-muted-foreground" />
-                    </button>
+                      <Columns3 className="w-3.5 h-3.5" />
+                    </motion.button>
                     <AnimatePresence>
-                      {showCleaningMenu && (
+                      {showColumnsMenu && (
                         <motion.div
                           initial={{ opacity: 0, y: -4, scale: 0.97 }}
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: -4, scale: 0.97 }}
                           transition={{ duration: 0.1 }}
-                          className="absolute right-0 top-full mt-1 w-44 bg-background border border-border rounded-xl shadow-lg z-20 overflow-hidden"
+                          className="absolute right-0 top-full mt-1 w-48 bg-background border border-border rounded-xl shadow-lg z-20 overflow-hidden p-1"
+                        >
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground px-2 pt-1.5 pb-1">컬럼 표시</p>
+                          <label className="flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded-lg hover:bg-secondary transition-colors cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={showUtmSource}
+                              onChange={(e) => setShowUtmSource(e.target.checked)}
+                              className="accent-violet-500"
+                            />
+                            UTM 소스
+                          </label>
+                          <label className="flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded-lg hover:bg-secondary transition-colors cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={showUtmMedium}
+                              onChange={(e) => setShowUtmMedium(e.target.checked)}
+                              className="accent-violet-500"
+                            />
+                            UTM 매체
+                          </label>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                  {/* 더보기 메뉴 */}
+                  <div ref={moreMenuRef} className="relative">
+                    <motion.button
+                      whileTap={{ scale: 0.92 }} transition={spring}
+                      onClick={() => setShowMoreMenu((v) => !v)}
+                      className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground"
+                      title="더보기"
+                    >
+                      <MoreHorizontal className="w-3.5 h-3.5" />
+                    </motion.button>
+                    <AnimatePresence>
+                      {showMoreMenu && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -4, scale: 0.97 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: -4, scale: 0.97 }}
+                          transition={{ duration: 0.1 }}
+                          className="absolute right-0 top-full mt-1 w-48 bg-background border border-border rounded-xl shadow-lg z-20 overflow-hidden"
                         >
                           <button
-                            onClick={() => { setShowNormalize(true); setShowCleaningMenu(false); }}
+                            onClick={() => { setShowImport(true); setShowMoreMenu(false); }}
                             className="flex items-center gap-2 w-full px-3 py-2.5 text-xs hover:bg-secondary transition-colors text-left"
+                          >
+                            <Upload className="w-3.5 h-3.5 text-violet-500 shrink-0" />
+                            <div>
+                              <div className="font-medium">가져오기</div>
+                              <div className="text-muted-foreground text-[11px]">엑셀/CSV</div>
+                            </div>
+                          </button>
+                          <div className="border-t border-border" />
+                          <button
+                            onClick={() => { setShowNormalize(true); setShowMoreMenu(false); }}
+                            disabled={recordsTotal === 0}
+                            className="flex items-center gap-2 w-full px-3 py-2.5 text-xs hover:bg-secondary transition-colors text-left disabled:opacity-40"
                           >
                             <Eraser className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                             <div>
@@ -778,10 +888,9 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                               <div className="text-muted-foreground text-[11px]">전화번호·이름 형식 통일</div>
                             </div>
                           </button>
-                          <div className="border-t border-border" />
                           <button
-                            onClick={() => { setShowCleanup(true); setShowCleaningMenu(false); }}
-                            disabled={source.fieldMappings.length === 0}
+                            onClick={() => { setShowCleanup(true); setShowMoreMenu(false); }}
+                            disabled={recordsTotal === 0 || source.fieldMappings.length === 0}
                             className="flex items-center gap-2 w-full px-3 py-2.5 text-xs hover:bg-secondary transition-colors text-left disabled:opacity-40"
                           >
                             <Wand2 className="w-3.5 h-3.5 text-amber-500 shrink-0" />
@@ -790,83 +899,120 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                               <div className="text-muted-foreground text-[11px]">중복 레코드 제거</div>
                             </div>
                           </button>
+                          <div className="border-t border-border" />
+                          <a
+                            href={`/api/collect-sources/${id}/export-all`}
+                            onClick={() => setShowMoreMenu(false)}
+                            className="flex items-center gap-2 w-full px-3 py-2.5 text-xs hover:bg-secondary transition-colors text-left"
+                          >
+                            <HardDriveDownload className="w-3.5 h-3.5 text-violet-500 shrink-0" />
+                            <div>
+                              <div className="font-medium">백업</div>
+                              <div className="text-muted-foreground text-[11px]">전체 JSON 다운로드</div>
+                            </div>
+                          </a>
                         </motion.div>
                       )}
                     </AnimatePresence>
                   </div>
-                  <button
-                    onClick={handleExportCsv}
-                    disabled={recordsTotal === 0}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium hover:bg-secondary transition-colors disabled:opacity-40"
-                    title={hasActiveFilter || selectedIds.size > 0 ? "필터/선택된 결과만 내보냅니다" : "전체 데이터를 내보냅니다"}
-                  >
-                    <Download className="w-3.5 h-3.5" />CSV 내보내기
-                  </button>
-                  <button onClick={fetchRecords} className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground">
-                    <RefreshCw className="w-3.5 h-3.5" />
-                  </button>
                 </div>
               </div>
 
               {/* 검색/필터 바 */}
-              {records.length > 0 && (
-                <div className="flex items-center gap-2 mb-3 flex-wrap">
-                  <div className="relative flex-1 min-w-[200px]">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/60" />
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="이름·이메일·휴대폰 등 모든 필드 검색"
-                      className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
-                    />
+              {records.length > 0 && (() => {
+                const activeFilterCount = [filterDateFrom, filterDateTo, filterUtmSource, filterUtmMedium].filter(Boolean).length;
+                return (
+                  <div className="mb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/60" />
+                        <input
+                          type="text"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          placeholder="이름·이메일·휴대폰 등 모든 필드 검색"
+                          className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+                        />
+                      </div>
+                      <motion.button
+                        whileHover={{ y: -1 }} whileTap={{ scale: 0.96 }} transition={spring}
+                        onClick={() => setFiltersOpen((v) => !v)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                          filtersOpen || activeFilterCount > 0
+                            ? "border-violet-400/50 bg-violet-500/5 text-violet-500"
+                            : "border-border text-muted-foreground hover:bg-secondary"
+                        }`}
+                      >
+                        <Filter className="w-3.5 h-3.5" />필터
+                        {activeFilterCount > 0 && (
+                          <span className="ml-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/15 text-violet-600 dark:text-violet-400">
+                            {activeFilterCount}
+                          </span>
+                        )}
+                      </motion.button>
+                    </div>
+                    <AnimatePresence initial={false}>
+                      {filtersOpen && (
+                        <motion.div
+                          key="filters"
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.18 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="flex items-center gap-2 mt-2 flex-wrap">
+                            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                              시작일
+                              <input
+                                type="date"
+                                value={filterDateFrom}
+                                onChange={(e) => setFilterDateFrom(e.target.value)}
+                                className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+                              />
+                            </label>
+                            <span className="text-xs text-muted-foreground">~</span>
+                            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                              종료일
+                              <input
+                                type="date"
+                                value={filterDateTo}
+                                onChange={(e) => setFilterDateTo(e.target.value)}
+                                className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+                              />
+                            </label>
+                            {utmSourceOptions.length > 0 && (
+                              <select
+                                value={filterUtmSource}
+                                onChange={(e) => setFilterUtmSource(e.target.value)}
+                                className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+                              >
+                                <option value="">UTM 소스 전체</option>
+                                {utmSourceOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+                              </select>
+                            )}
+                            {utmMediumOptions.length > 0 && (
+                              <select
+                                value={filterUtmMedium}
+                                onChange={(e) => setFilterUtmMedium(e.target.value)}
+                                className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
+                              >
+                                <option value="">UTM 매체 전체</option>
+                                {utmMediumOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+                              </select>
+                            )}
+                            {hasActiveFilter && (
+                              <button onClick={resetFilters} className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs text-muted-foreground hover:bg-secondary transition-colors">
+                                <Filter className="w-3 h-3" />필터 해제
+                              </button>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
-                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    시작일
-                    <input
-                      type="date"
-                      value={filterDateFrom}
-                      onChange={(e) => setFilterDateFrom(e.target.value)}
-                      className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
-                    />
-                  </label>
-                  <span className="text-xs text-muted-foreground">~</span>
-                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    종료일
-                    <input
-                      type="date"
-                      value={filterDateTo}
-                      onChange={(e) => setFilterDateTo(e.target.value)}
-                      className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
-                    />
-                  </label>
-                  {utmSourceOptions.length > 0 && (
-                    <select
-                      value={filterUtmSource}
-                      onChange={(e) => setFilterUtmSource(e.target.value)}
-                      className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
-                    >
-                      <option value="">UTM 소스 전체</option>
-                      {utmSourceOptions.map((v) => <option key={v} value={v}>{v}</option>)}
-                    </select>
-                  )}
-                  {utmMediumOptions.length > 0 && (
-                    <select
-                      value={filterUtmMedium}
-                      onChange={(e) => setFilterUtmMedium(e.target.value)}
-                      className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
-                    >
-                      <option value="">UTM 매체 전체</option>
-                      {utmMediumOptions.map((v) => <option key={v} value={v}>{v}</option>)}
-                    </select>
-                  )}
-                  {hasActiveFilter && (
-                    <button onClick={resetFilters} className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs text-muted-foreground hover:bg-secondary transition-colors">
-                      <Filter className="w-3 h-3" />필터 해제
-                    </button>
-                  )}
-                </div>
-              )}
+                );
+              })()}
 
               {/* 필터된 전체 선택 배너 */}
               {selectedIds.size > 0 && selectedIds.size < filteredRecords.length && pagedRecords.every((r) => selectedIds.has(r.id)) && (
@@ -915,23 +1061,32 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                             시간 {sortIcon("createdAt")}
                           </button>
                         </th>
-                        {source.fieldMappings.map((f) => (
-                          <th key={f.id} className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground whitespace-nowrap">
+                        {source.fieldMappings.map((f) => {
+                          const colWidth = f.type === "email" ? "max-w-[240px]"
+                            : (f.type === "select" || f.type === "checkbox") ? "max-w-[80px]"
+                            : "max-w-[200px]";
+                          return (
+                          <th key={f.id} className={`text-left px-4 py-2.5 text-xs font-medium text-muted-foreground whitespace-nowrap ${colWidth}`}>
                             <button onClick={() => cycleSort("field", f.key)} className="flex items-center gap-1 hover:text-foreground transition-colors">
                               {f.label} {sortIcon("field", f.key)}
                             </button>
                           </th>
-                        ))}
-                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground whitespace-nowrap">
-                          <button onClick={() => cycleSort("utmSource")} className="flex items-center gap-1 hover:text-foreground transition-colors">
-                            UTM 소스 {sortIcon("utmSource")}
-                          </button>
-                        </th>
-                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground whitespace-nowrap">
-                          <button onClick={() => cycleSort("utmMedium")} className="flex items-center gap-1 hover:text-foreground transition-colors">
-                            UTM 매체 {sortIcon("utmMedium")}
-                          </button>
-                        </th>
+                          );
+                        })}
+                        {showUtmSource && (
+                          <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground whitespace-nowrap">
+                            <button onClick={() => cycleSort("utmSource")} className="flex items-center gap-1 hover:text-foreground transition-colors">
+                              UTM 소스 {sortIcon("utmSource")}
+                            </button>
+                          </th>
+                        )}
+                        {showUtmMedium && (
+                          <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground whitespace-nowrap">
+                            <button onClick={() => cycleSort("utmMedium")} className="flex items-center gap-1 hover:text-foreground transition-colors">
+                              UTM 매체 {sortIcon("utmMedium")}
+                            </button>
+                          </th>
+                        )}
                       </tr>
                     </thead>
                     <tbody>
@@ -951,11 +1106,16 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                             />
                           </td>
                           <td className={`px-4 py-3 text-xs text-muted-foreground whitespace-nowrap sticky left-10 z-[1] shadow-[1px_0_0_0_hsl(var(--border))] ${selectedIds.has(record.id) ? "bg-violet-500/5" : "bg-background group-hover:bg-secondary/30"}`}>{timeStr(record.createdAt)}</td>
-                          {source.fieldMappings.map((f) => (
-                            <td key={f.id} className="px-4 py-3 text-xs max-w-[160px] truncate">{record.data[f.key] ?? "-"}</td>
-                          ))}
-                          <td className="px-4 py-3 text-xs text-muted-foreground">{record.utmSource ?? "-"}</td>
-                          <td className="px-4 py-3 text-xs text-muted-foreground">{record.utmMedium ?? "-"}</td>
+                          {source.fieldMappings.map((f) => {
+                            const colWidth = f.type === "email" ? "max-w-[240px]"
+                              : (f.type === "select" || f.type === "checkbox") ? "max-w-[80px]"
+                              : "max-w-[200px]";
+                            return (
+                            <td key={f.id} className={`px-4 py-3 text-xs ${colWidth} truncate`}>{record.data[f.key] ?? "-"}</td>
+                            );
+                          })}
+                          {showUtmSource && <td className="px-4 py-3 text-xs text-muted-foreground">{record.utmSource ?? "-"}</td>}
+                          {showUtmMedium && <td className="px-4 py-3 text-xs text-muted-foreground">{record.utmMedium ?? "-"}</td>}
                         </tr>
                       ))}
                     </tbody>
@@ -1251,7 +1411,47 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
             </div>
           )}
 
-          {/* 보안/알림 탭 */}
+          {/* 설치 탭 */}
+          {tab === "install" && (
+            <div className="space-y-4 max-w-2xl">
+              {/* 성공 트리거 / 리다이렉트 */}
+              <div className="p-4 rounded-2xl border border-border bg-background space-y-3">
+                <div className="flex items-center gap-2">
+                  <Link2 className="w-4 h-4 text-violet-500" />
+                  <h3 className="text-sm font-medium">제출 성공 동작</h3>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">성공 트리거 텍스트</label>
+                  <input type="text" value={successTrigger} onChange={(e) => setSuccessTrigger(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400" />
+                  <p className="text-[11px] text-muted-foreground mt-1">폼 제출 후 이 텍스트가 나타나면 데이터를 수집해요</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">제출 후 리다이렉트 URL <span className="text-muted-foreground/60">(선택)</span></label>
+                  <input type="url" value={redirectUrl} onChange={(e) => setRedirectUrl(e.target.value)}
+                    placeholder="https://example.com/thank-you"
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400" />
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <motion.button
+                  whileHover={{ y: -1 }} whileTap={{ scale: 0.96 }} transition={spring}
+                  onClick={() => {
+                    void handleSaveSettings();
+                    void handleSaveSecuritySettings();
+                  }}
+                  disabled={savingSettings}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
+                >
+                  {savingSettings ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  설치 설정 저장
+                </motion.button>
+              </div>
+            </div>
+          )}
+
+          {/* 설정 탭 */}
           {tab === "settings" && (
             <div className="space-y-4 max-w-2xl">
               {/* 알림 */}
@@ -1304,26 +1504,6 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                 </details>
               </div>
 
-              {/* 성공 트리거 / 리다이렉트 */}
-              <div className="p-4 rounded-2xl border border-border bg-background space-y-3">
-                <div className="flex items-center gap-2">
-                  <Link2 className="w-4 h-4 text-violet-500" />
-                  <h3 className="text-sm font-medium">제출 성공 동작</h3>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">성공 트리거 텍스트</label>
-                  <input type="text" value={successTrigger} onChange={(e) => setSuccessTrigger(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400" />
-                  <p className="text-[11px] text-muted-foreground mt-1">폼 제출 후 이 텍스트가 나타나면 데이터를 수집해요</p>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">제출 후 리다이렉트 URL <span className="text-muted-foreground/60">(선택)</span></label>
-                  <input type="url" value={redirectUrl} onChange={(e) => setRedirectUrl(e.target.value)}
-                    placeholder="https://example.com/thank-you"
-                    className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400" />
-                </div>
-              </div>
-
               {/* 허용 Origin */}
               <div className="p-4 rounded-2xl border border-border bg-background space-y-3">
                 <div className="flex items-center gap-2">
@@ -1340,20 +1520,6 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                   rows={3}
                   className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm font-mono focus:outline-none focus:border-violet-400 resize-none"
                 />
-              </div>
-
-              <div className="flex justify-end">
-                <button
-                  onClick={() => {
-                    void handleSaveSettings();
-                    void handleSaveSecuritySettings();
-                  }}
-                  disabled={savingSettings}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
-                >
-                  {savingSettings ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                  설정 저장
-                </button>
               </div>
 
               {/* API 키 */}
@@ -1381,8 +1547,40 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                 </div>
               </div>
 
-              {/* 백업 */}
+              {/* 보관 정책 */}
               <div className="p-4 rounded-2xl border border-border bg-background space-y-3">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-emerald-500" />
+                  <h3 className="text-sm font-medium">자동 보관 기간</h3>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  설정 일수가 지난 레코드는 매일 자동 삭제됩니다. 개인정보 보호 대응.
+                </p>
+                <RetentionPolicyEditor sourceId={id} />
+              </div>
+
+              <div className="flex justify-end">
+                <motion.button
+                  whileHover={{ y: -1 }} whileTap={{ scale: 0.96 }} transition={spring}
+                  onClick={() => {
+                    void handleSaveSettings();
+                    void handleSaveSecuritySettings();
+                  }}
+                  disabled={savingSettings}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
+                >
+                  {savingSettings ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  설정 저장
+                </motion.button>
+              </div>
+            </div>
+          )}
+
+          {/* 데이터 관리 탭 */}
+          {tab === "data-mgmt" && (
+            <div className="space-y-4 max-w-2xl">
+              {/* 백업 */}
+              <div className="p-4 rounded-2xl border border-red-500/30 bg-background space-y-3">
                 <div className="flex items-center gap-2">
                   <Download className="w-4 h-4 text-violet-500" />
                   <h3 className="text-sm font-medium">데이터 백업</h3>
@@ -1398,20 +1596,8 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                 </a>
               </div>
 
-              {/* 보관 정책 */}
-              <div className="p-4 rounded-2xl border border-border bg-background space-y-3">
-                <div className="flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-emerald-500" />
-                  <h3 className="text-sm font-medium">자동 보관 기간</h3>
-                </div>
-                <p className="text-[11px] text-muted-foreground">
-                  설정 일수가 지난 레코드는 매일 자동 삭제됩니다. 개인정보 보호 대응.
-                </p>
-                <RetentionPolicyEditor sourceId={id} />
-              </div>
-
               {/* GDPR */}
-              <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5 space-y-3">
+              <div className="p-4 rounded-2xl border border-red-500/30 bg-amber-500/5 space-y-3">
                 <div className="flex items-center gap-2">
                   <ShieldAlert className="w-4 h-4 text-amber-500" />
                   <h3 className="text-sm font-medium">개인정보 검색·삭제 (GDPR)</h3>
@@ -1428,7 +1614,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
               </div>
 
               {/* 위험 영역 */}
-              <div className="p-4 rounded-2xl border-2 border-red-500/30 bg-red-500/5 space-y-3 mt-4">
+              <div className="p-4 rounded-2xl border-2 border-red-500/30 bg-red-500/5 space-y-3">
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-red-500" />
                   <h3 className="text-sm font-semibold text-red-600 dark:text-red-400">위험 영역</h3>

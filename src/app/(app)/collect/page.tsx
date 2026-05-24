@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { useWorkspace } from "@/contexts/workspace";
 import Link from "next/link";
 import ProjectMembersModal from "@/components/settings/ProjectMembersModal";
+import ActiveToggle from "@/app/(app)/collect/_components/ActiveToggle";
 
 interface CollectSource {
   id: string;
@@ -71,14 +72,28 @@ export default function CollectPage() {
     }
   };
 
-  const handleToggle = async (source: CollectSource) => {
-    const res = await fetch(`/api/collect-sources/${source.id}`, {
+  const handleToggleSilent = async (sourceId: string, next: boolean) => {
+    const res = await fetch(`/api/collect-sources/${sourceId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isActive: !source.isActive }),
+      body: JSON.stringify({ isActive: next }),
     });
     if (!res.ok) { toast.error("상태 변경 실패"); return; }
-    setSources((prev) => prev.map((s) => s.id === source.id ? { ...s, isActive: !source.isActive } : s));
+    setSources((prev) => prev.map((s) => s.id === sourceId ? { ...s, isActive: next } : s));
+  };
+
+  const handleToggle = async (source: CollectSource, next: boolean) => {
+    const prev = source.isActive;
+    await handleToggleSilent(source.id, next);
+    if (prev && !next) {
+      toast("사전등록 폼이 비활성화됐어요", {
+        description: "새 데이터 수집이 중단됩니다",
+        duration: 5000,
+        action: { label: "되돌리기", onClick: () => handleToggleSilent(source.id, true) },
+      });
+    } else if (!prev && next) {
+      toast.success("사전등록 폼이 활성화됐어요");
+    }
   };
 
   const handleRenameSource = async (id: string) => {
@@ -342,20 +357,12 @@ export default function CollectPage() {
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 {/* 토글 스위치 */}
-                <button
-                  onClick={(e) => { e.preventDefault(); handleToggle(source); }}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-medium transition-all ${
-                    source.isActive
-                      ? "bg-violet-500/10 text-violet-600 dark:text-violet-400"
-                      : "bg-secondary text-muted-foreground hover:text-foreground"
-                  }`}
-                  title={source.isActive ? "클릭해서 비활성화" : "클릭해서 활성화"}
-                >
-                  <div className={`relative w-6 h-3.5 rounded-full transition-colors shrink-0 ${source.isActive ? "bg-violet-500" : "bg-muted-foreground/30"}`}>
-                    <div className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow-sm transition-transform ${source.isActive ? "translate-x-2.5" : "translate-x-0.5"}`} />
-                  </div>
-                  {source.isActive ? "활성" : "비활성"}
-                </button>
+                <ActiveToggle
+                  active={source.isActive}
+                  onChange={(next) => handleToggle(source, next)}
+                  size="sm"
+                  showLabel={false}
+                />
                 <button
                   onClick={(e) => { e.preventDefault(); setDeleteId(source.id); }}
                   className="p-1.5 rounded-xl hover:bg-red-500/10 hover:text-red-500 transition-colors text-muted-foreground opacity-0 group-hover:opacity-100"

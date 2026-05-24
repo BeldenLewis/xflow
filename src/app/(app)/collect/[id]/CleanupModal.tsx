@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Sparkles, X, Loader2, Check, AlertTriangle } from "lucide-react";
+import { Sparkles, Loader2, Check, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
+import ModalShell from "./ModalShell";
 
 const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
@@ -74,39 +75,22 @@ export default function CleanupModal({ sourceId, fieldMappings, onClose, onClean
   const fieldLabel = (key: string) => fieldMappings.find((f) => f.key === key)?.label || key;
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.15 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ opacity: 0, y: 8, scale: 0.97 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 8, scale: 0.97 }}
-        transition={spring}
-        className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-amber-500" />
-            <h2 className="text-sm font-semibold">중복 데이터 정리</h2>
-          </div>
-          <motion.button
-            whileHover={{ rotate: 90 }}
-            whileTap={{ scale: 0.9 }}
-            transition={spring}
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </motion.button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+    <ModalShell open onClose={onClose} title="중복 데이터 정리" size="md" footer={
+      preview && preview.toDelete > 0 ? (
+        <motion.button
+          whileHover={{ y: -1 }}
+          whileTap={{ scale: 0.96 }}
+          transition={spring}
+          onClick={handleRun}
+          disabled={running}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500 text-white text-sm font-medium hover:bg-red-600 transition-colors disabled:opacity-40"
+        >
+          {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+          {running ? "정리 중..." : `${preview.toDelete}건 삭제`}
+        </motion.button>
+      ) : null
+    }>
+      <div className="space-y-5">
           <div>
             <label className="text-xs text-muted-foreground mb-1.5 block">기준 필드</label>
             <select
@@ -229,24 +213,7 @@ export default function CleanupModal({ sourceId, fieldMappings, onClose, onClean
             </motion.div>
           )}
           </AnimatePresence>
-        </div>
-
-        {preview && preview.toDelete > 0 && (
-          <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-secondary/30">
-            <motion.button
-              whileHover={{ y: -1 }}
-              whileTap={{ scale: 0.96 }}
-              transition={spring}
-              onClick={handleRun}
-              disabled={running}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500 text-white text-sm font-medium hover:bg-red-600 transition-colors disabled:opacity-40"
-            >
-              {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-              {running ? "정리 중..." : `${preview.toDelete}건 삭제`}
-            </motion.button>
-          </div>
-        )}
-      </motion.div>
-    </motion.div>
+      </div>
+    </ModalShell>
   );
 }

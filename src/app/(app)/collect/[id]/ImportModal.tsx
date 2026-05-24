@@ -2,8 +2,9 @@
 
 import { useState, useRef } from "react";
 import { motion } from "framer-motion";
-import { Upload, X, FileSpreadsheet, Loader2, ArrowRight, Check } from "lucide-react";
+import { Upload, FileSpreadsheet, Loader2, ArrowRight, Check } from "lucide-react";
 import { toast } from "sonner";
+import ModalShell from "./ModalShell";
 
 const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
 
@@ -480,40 +481,8 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
     : 0;
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.15 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ opacity: 0, y: 8, scale: 0.97 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 8, scale: 0.97 }}
-        transition={spring}
-        className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <div className="flex items-center gap-2">
-            <FileSpreadsheet className="w-4 h-4 text-violet-500" />
-            <h2 className="text-sm font-semibold">엑셀/CSV 데이터 가져오기</h2>
-            {fileName && <span className="text-xs text-muted-foreground">· {fileName}</span>}
-          </div>
-          <motion.button
-            whileHover={{ rotate: 90 }}
-            whileTap={{ scale: 0.9 }}
-            transition={spring}
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </motion.button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-5">
+    <ModalShell open onClose={onClose} size="xl" title="엑셀/CSV 데이터 가져오기" description={fileName ? fileName : undefined}>
+      <div>
           {step === "upload" && (
             <div className="space-y-4">
               <div
@@ -650,7 +619,6 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
               )}
             </div>
           )}
-        </div>
 
         {step === "map" && (
           <div className="px-5 py-3 border-t border-border bg-secondary/30 space-y-3">
@@ -807,7 +775,7 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
             </div>
           </div>
         )}
-      </motion.div>
-    </motion.div>
+      </div>
+    </ModalShell>
   );
 }

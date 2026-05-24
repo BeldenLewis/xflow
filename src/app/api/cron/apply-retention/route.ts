@@ -4,9 +4,9 @@ import { prisma } from "@/lib/prisma";
 // 매일 한 번 호출 — CollectRetentionPolicy 정책에 따라 N일 지난 레코드 삭제.
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
-  const auth = request.headers.get("authorization");
-  if (secret && auth !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const auth = request.headers.get("authorization") ?? request.headers.get("Authorization");
+  if (!secret || auth !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const policies = await prisma.collectRetentionPolicy.findMany();

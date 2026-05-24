@@ -9,7 +9,7 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
   const memberships = await prisma.workspaceMember.findMany({
-    where: { userId: user.id },
+    where: { userId: user.id, workspace: { deletedAt: null } },
     include: { workspace: { include: { projects: { orderBy: { createdAt: "asc" } } } } },
     orderBy: { joinedAt: "asc" },
   });

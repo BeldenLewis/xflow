@@ -15,6 +15,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   });
 
   if (!membership) return NextResponse.json({ error: "권한 없음" }, { status: 403 });
+  if (membership.workspace.deletedAt) return NextResponse.json({ error: "삭제된 워크스페이스" }, { status: 404 });
 
   return NextResponse.json({
     workspace: { id: membership.workspace.id, name: membership.workspace.name, slug: membership.workspace.slug },

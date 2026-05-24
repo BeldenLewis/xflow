@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity";
 
-async function authorize(id: string) {
+async function authorize(id: string, requireAdmin = false) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: NextResponse.json({ error: "인증 필요" }, { status: 401 }) };
@@ -15,6 +15,9 @@ async function authorize(id: string) {
     where: { userId_workspaceId: { userId: user.id, workspaceId: source.workspaceId } },
   });
   if (!membership) return { error: NextResponse.json({ error: "접근 권한 없음" }, { status: 403 }) };
+  if (requireAdmin && membership.role === "MEMBER") {
+    return { error: NextResponse.json({ error: "권한 없음 (ADMIN 이상)" }, { status: 403 }) };
+  }
 
   return { source, userId: user.id };
 }
@@ -79,7 +82,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string; recordId: string }> }) {
   const { id, recordId } = await params;
-  const auth = await authorize(id);
+  const auth = await authorize(id, true);
   if ("error" in auth) return auth.error;
 
   await prisma.collectRecord.delete({ where: { id: recordId } });

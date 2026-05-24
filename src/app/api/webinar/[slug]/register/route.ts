@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { rateLimit } from "@/lib/ratelimit";
 
 interface RegistrationField {
   key: string;
@@ -60,6 +61,18 @@ function normalizeEmail(value: unknown) {
 export async function POST(request: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
 
+  const ip =
+    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ??
+    request.headers.get("x-real-ip") ??
+    "unknown";
+  const rl = rateLimit(`webinar-register:${slug}:${ip}`, { limit: 30, windowMs: 60_000 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "요청이 너무 잦아요. 잠시 후 다시 시도해주세요." },
+      { status: 429, headers: { "Retry-After": Math.ceil(rl.retryAfterMs / 1000).toString() } },
+    );
+  }
+
   const webinar = await prisma.webinar.findUnique({ where: { slug } });
   if (!webinar) return NextResponse.json({ error: "없는 웨비나예요" }, { status: 404 });
 
@@ -69,6 +82,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   }
 
   const body = await request.json();
+
+  // 허니팟 — 봇이 자동완성하는 hidden 필드. 값이 들어오면 봇으로 간주.
+  // 200 응답으로 봇이 재시도하지 못하게.
+  const honeypot = (body?._hp ?? body?.honeypot ?? body?.website) as string | undefined;
+  if (honeypot && String(honeypot).trim() !== "") {
+    return NextResponse.json(
+      { registration: { id: "skipped", name: "", email: null, phone: null } },
+      { status: 201, headers: { "Access-Control-Allow-Origin": "*" } },
+    );
+  }
   const { name, phone, email, company, department, jobTitle, industry, agreeMarketing, agreePrivacy, memo, customFields } = body;
   const normalizedPhone = normalizePhone(phone);
   const normalizedEmail = normalizeEmail(email);

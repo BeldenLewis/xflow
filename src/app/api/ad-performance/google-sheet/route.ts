@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { prisma } from "@/lib/prisma";
 
 const MAX_GOOGLE_SHEET_CHARS = 12_000_000;
 
@@ -36,10 +37,36 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
-  const body = await request.json().catch(() => null) as { url?: string } | null;
+  const body = await request.json().catch(() => null) as {
+    url?: string;
+    workspaceId?: string;
+    projectId?: string;
+  } | null;
   const rawUrl = body?.url?.trim();
   if (!rawUrl) {
     return NextResponse.json({ error: "Google Sheets URL을 입력해주세요." }, { status: 400 });
+  }
+
+  // 워크스페이스 멤버십 확인 — 인증된 사용자가 임의 워크스페이스 컨텍스트로
+  // 외부 시트를 요청해서 데이터를 가로채는 시나리오 방어.
+  const workspaceId = body?.workspaceId?.trim();
+  if (!workspaceId) {
+    return NextResponse.json({ error: "워크스페이스 정보가 필요해요." }, { status: 400 });
+  }
+  const membership = await prisma.workspaceMember.findUnique({
+    where: { userId_workspaceId: { userId: user.id, workspaceId } },
+  });
+  if (!membership) {
+    return NextResponse.json({ error: "워크스페이스 접근 권한이 없어요." }, { status: 403 });
+  }
+  if (body?.projectId) {
+    const project = await prisma.project.findUnique({
+      where: { id: body.projectId },
+      select: { workspaceId: true },
+    });
+    if (!project || project.workspaceId !== workspaceId) {
+      return NextResponse.json({ error: "프로젝트 접근 권한이 없어요." }, { status: 403 });
+    }
   }
 
   try {

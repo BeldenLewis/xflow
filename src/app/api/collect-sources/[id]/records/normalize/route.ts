@@ -44,6 +44,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     where: { userId_workspaceId: { userId: user.id, workspaceId: source.workspaceId } },
   });
   if (!membership) return NextResponse.json({ error: "접근 권한 없음" }, { status: 403 });
+  if (membership.role === "MEMBER") return NextResponse.json({ error: "권한 없음 (ADMIN 이상)" }, { status: 403 });
 
   const body: NormalizeBody = await request.json().catch(() => ({ ops: [] } as NormalizeBody));
   const ops: NormalizeOp[] = Array.isArray(body.ops) ? body.ops : [];

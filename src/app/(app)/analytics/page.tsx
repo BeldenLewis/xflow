@@ -2173,7 +2173,7 @@ function UploadModal({
       const res = await fetch("/api/ad-performance/google-sheet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: trimmedUrl }),
+        body: JSON.stringify({ url: trimmedUrl, workspaceId, projectId }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Google Sheets를 불러오지 못했어요");

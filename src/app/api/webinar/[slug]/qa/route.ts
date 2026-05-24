@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { rateLimit } from "@/lib/ratelimit";
 
 export async function GET(request: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -21,6 +22,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
 export async function POST(request: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
 
+  const ip =
+    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ??
+    request.headers.get("x-real-ip") ??
+    "unknown";
+  const rl = rateLimit(`webinar-qa:${slug}:${ip}`, { limit: 30, windowMs: 60_000 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "요청이 너무 잦아요. 잠시 후 다시 시도해주세요." },
+      { status: 429, headers: { "Retry-After": Math.ceil(rl.retryAfterMs / 1000).toString() } },
+    );
+  }
+
   const webinar = await prisma.webinar.findUnique({ where: { slug } });
   if (!webinar) return NextResponse.json({ error: "없는 웨비나예요" }, { status: 404 });
 
@@ -32,6 +45,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
 
   const body = await request.json();
   const { question, sessionNumber, name, company, phone, email } = body;
+
+  // 허니팟 — 봇 차단. 200 으로 응답.
+  const honeypot = (body?._hp ?? body?.honeypot ?? body?.website) as string | undefined;
+  if (honeypot && String(honeypot).trim() !== "") {
+    return NextResponse.json(
+      { qa: { id: "skipped" } },
+      { status: 201, headers: { "Access-Control-Allow-Origin": "*" } },
+    );
+  }
 
   if (!question?.trim()) {
     return NextResponse.json({ error: "질문 내용을 입력해주세요" }, { status: 400 });

@@ -7,9 +7,9 @@ import { formatKstDateTime, kstDateString } from "@/lib/datetime";
 // 보호: CRON_SECRET 환경변수 일치하는 경우만 실행.
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
-  const auth = request.headers.get("authorization");
-  if (secret && auth !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const auth = request.headers.get("authorization") ?? request.headers.get("Authorization");
+  if (!secret || auth !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const now = new Date();

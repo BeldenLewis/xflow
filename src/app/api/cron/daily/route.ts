@@ -5,9 +5,9 @@ import { prisma } from "@/lib/prisma";
 // Vercel Hobby cron 2개 한도 회피.
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
-  const auth = request.headers.get("authorization");
-  if (secret && auth !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const auth = request.headers.get("authorization") ?? request.headers.get("Authorization");
+  if (!secret || auth !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const result: Record<string, unknown> = {};

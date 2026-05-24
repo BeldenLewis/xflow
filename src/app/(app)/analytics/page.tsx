@@ -245,19 +245,6 @@ function formatKRW(value: number | null | undefined) {
   return `${Math.round(value ?? 0).toLocaleString("ko-KR")}원`;
 }
 
-function formatKRWCompact(value: number | null | undefined) {
-  const n = Math.round(value ?? 0);
-  const abs = Math.abs(n);
-  if (abs >= 100_000_000) {
-    const eok = n / 100_000_000;
-    return `${eok.toFixed(abs >= 1_000_000_000 ? 1 : 2)}억원`;
-  }
-  if (abs >= 1_000_000) {
-    return `${Math.round(n / 10_000).toLocaleString("ko-KR")}만원`;
-  }
-  return `${n.toLocaleString("ko-KR")}원`;
-}
-
 function computeLogTrend(points: Array<{ cost: number; conversions: number }>) {
   const valid = points.filter((p) => p.cost > 0);
   if (valid.length < 3) return null;
@@ -761,7 +748,7 @@ export default function AnalyticsPage() {
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
-        <MetricCard label="지출" value={formatKRWCompact(totals?.cost)} sub={currentScopeLabel} currentRaw={totals?.cost} previousRaw={previousTotals?.cost ?? undefined} lowerIsBetter />
+        <MetricCard label="지출" value={formatKRW(totals?.cost)} sub={currentScopeLabel} currentRaw={totals?.cost} previousRaw={previousTotals?.cost ?? undefined} lowerIsBetter />
         <MetricCard label="CPM" value={formatKRW(totals?.cpm)} sub={`노출 ${formatNumber(totals?.impressions)}`} currentRaw={totals?.cpm} previousRaw={previousTotals?.cpm ?? undefined} lowerIsBetter />
         <MetricCard label="CPC" value={formatKRW(totals?.cpc)} sub={`클릭 ${formatNumber(totals?.clicks)}`} currentRaw={totals?.cpc} previousRaw={previousTotals?.cpc ?? undefined} lowerIsBetter />
         <MetricCard label="CTR" value={formatPct(totals?.ctr)} currentRaw={totals?.ctr} previousRaw={previousTotals?.ctr ?? undefined} />
@@ -1747,15 +1734,14 @@ function MetricCard({
       transition={spring}
       className="rounded-2xl border border-border bg-background p-4"
     >
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <div className="mt-2 flex items-end gap-2">
-        <p className="truncate text-xl font-semibold">{value}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium text-muted-foreground">{label}</p>
         {badge && (
           <motion.span
             initial={{ opacity: 0, scale: 0.85 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={spring}
-            className={`mb-0.5 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${
+            className={`inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${
               badge.improved
                 ? "bg-emerald-500/12 text-emerald-600"
                 : "bg-red-500/12 text-red-500"
@@ -1770,6 +1756,7 @@ function MetricCard({
           </motion.span>
         )}
       </div>
+      <p className="mt-2 truncate text-xl font-semibold">{value}</p>
       {sub && <p className="mt-1 text-xs text-muted-foreground">{sub}</p>}
     </motion.div>
   );

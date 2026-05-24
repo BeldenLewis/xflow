@@ -1273,7 +1273,7 @@ export default function AnalyticsPage() {
                 const scatterPoints = (data?.campaignSummary ?? []).map((c) => ({
                   cost: c.cost ?? 0,
                   conversions: c.conversions ?? 0,
-                  ctr: (c.ctr ?? 0) * 100,
+                  ctr: c.ctr ?? 0,
                   name: c.campaignName,
                 }));
                 const trendPoints = computeLogTrend(scatterPoints);
@@ -1307,10 +1307,16 @@ export default function AnalyticsPage() {
                         <ZAxis type="number" dataKey="ctr" range={[40, 400]} name="CTR" />
                         <Tooltip
                           cursor={{ strokeDasharray: "3 3" }}
+                          labelFormatter={(label, payload) => {
+                            const point = payload?.[0]?.payload as { name?: string } | undefined;
+                            if (point?.name) return point.name;
+                            return formatMetricValue("cost", Number(label));
+                          }}
                           formatter={(value, name) => {
-                            if (name === "지출") return [formatMetricValue("cost", Number(value)), name];
-                            if (name === "CTR") return [`${Number(value).toFixed(2)}%`, name];
-                            if (name === "예상 전환" || name === "predicted") return [`${Number(value).toFixed(1)}`, "예상 전환"];
+                            if (name === "지출") return [formatMetricValue("cost", Number(value)), "지출"];
+                            if (name === "CTR") return [`${Number(value).toFixed(2)}%`, "CTR"];
+                            if (name === "전환수") return [formatNumber(Number(value)), "전환수"];
+                            if (name === "예상 전환" || name === "predicted") return [`${Number(value).toFixed(1)}건`, "예상 전환 (트렌드)"];
                             return [value, name];
                           }}
                         />
@@ -1333,7 +1339,7 @@ export default function AnalyticsPage() {
                           dataKey="conversions"
                           fill="#0ea5e9"
                           fillOpacity={0.7}
-                          name="캠페인"
+                          name="전환수"
                         />
                       </ComposedChart>
                     </ResponsiveContainer>

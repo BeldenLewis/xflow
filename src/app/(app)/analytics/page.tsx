@@ -32,7 +32,6 @@ import {
   Line,
   ResponsiveContainer,
   Scatter,
-  ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
@@ -244,6 +243,47 @@ function formatNumber(value: number | null | undefined) {
 
 function formatKRW(value: number | null | undefined) {
   return `${Math.round(value ?? 0).toLocaleString("ko-KR")}원`;
+}
+
+function formatKRWCompact(value: number | null | undefined) {
+  const n = Math.round(value ?? 0);
+  const abs = Math.abs(n);
+  if (abs >= 100_000_000) {
+    const eok = n / 100_000_000;
+    return `${eok.toFixed(abs >= 1_000_000_000 ? 1 : 2)}억원`;
+  }
+  if (abs >= 1_000_000) {
+    return `${Math.round(n / 10_000).toLocaleString("ko-KR")}만원`;
+  }
+  return `${n.toLocaleString("ko-KR")}원`;
+}
+
+function computeLogTrend(points: Array<{ cost: number; conversions: number }>) {
+  const valid = points.filter((p) => p.cost > 0);
+  if (valid.length < 3) return null;
+  const xs = valid.map((p) => Math.log(p.cost));
+  const ys = valid.map((p) => p.conversions);
+  const n = valid.length;
+  const sumX = xs.reduce((s, x) => s + x, 0);
+  const sumY = ys.reduce((s, y) => s + y, 0);
+  const sumXY = xs.reduce((s, x, i) => s + x * ys[i], 0);
+  const sumX2 = xs.reduce((s, x) => s + x * x, 0);
+  const denom = n * sumX2 - sumX * sumX;
+  if (denom === 0) return null;
+  const a = (n * sumXY - sumX * sumY) / denom;
+  const b = (sumY - a * sumX) / n;
+  const minCost = Math.min(...valid.map((p) => p.cost));
+  const maxCost = Math.max(...valid.map((p) => p.cost));
+  if (maxCost === minCost) return null;
+  const steps = 30;
+  const trendPoints: Array<{ cost: number; predicted: number }> = [];
+  for (let i = 0; i <= steps; i++) {
+    const ratio = i / steps;
+    const x = minCost + (maxCost - minCost) * ratio;
+    const y = Math.max(0, a * Math.log(x) + b);
+    trendPoints.push({ cost: x, predicted: y });
+  }
+  return trendPoints;
 }
 
 function formatPct(value: number | null | undefined) {
@@ -721,7 +761,7 @@ export default function AnalyticsPage() {
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
-        <MetricCard label="지출" value={formatKRW(totals?.cost)} sub={currentScopeLabel} currentRaw={totals?.cost} previousRaw={previousTotals?.cost ?? undefined} lowerIsBetter />
+        <MetricCard label="지출" value={formatKRWCompact(totals?.cost)} sub={currentScopeLabel} currentRaw={totals?.cost} previousRaw={previousTotals?.cost ?? undefined} lowerIsBetter />
         <MetricCard label="CPM" value={formatKRW(totals?.cpm)} sub={`노출 ${formatNumber(totals?.impressions)}`} currentRaw={totals?.cpm} previousRaw={previousTotals?.cpm ?? undefined} lowerIsBetter />
         <MetricCard label="CPC" value={formatKRW(totals?.cpc)} sub={`클릭 ${formatNumber(totals?.clicks)}`} currentRaw={totals?.cpc} previousRaw={previousTotals?.cpc ?? undefined} lowerIsBetter />
         <MetricCard label="CTR" value={formatPct(totals?.ctr)} currentRaw={totals?.ctr} previousRaw={previousTotals?.ctr ?? undefined} />
@@ -1240,51 +1280,79 @@ export default function AnalyticsPage() {
             >
               <div className="mb-4">
                 <h2 className="text-sm font-semibold">캠페인 효율 산포도</h2>
-                <p className="mt-0.5 text-xs text-muted-foreground">지출(X) × 전환(Y) · 원 크기 = CTR</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">지출(X) × 전환(Y) · 원 크기 = CTR · 초록 점선 = 수확체감 곡선</p>
               </div>
-              {(data?.campaignSummary ?? []).length === 0 ? (
-                <div className="flex h-52 flex-col items-center justify-center gap-2 text-muted-foreground">
-                  <BarChart3 className="h-8 w-8 opacity-25" />
-                  <p className="text-sm">캠페인 데이터가 없어요</p>
-                </div>
-              ) : (
-                <div className="h-52">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ScatterChart>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                      <XAxis
-                        type="number"
-                        dataKey="cost"
-                        name="지출"
-                        tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
-                        tickFormatter={(v) => formatMetricValue("cost", Number(v))}
-                      />
-                      <YAxis
-                        type="number"
-                        dataKey="conversions"
-                        name="전환"
-                        tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
-                        width={52}
-                      />
-                      <ZAxis type="number" dataKey="ctr" range={[40, 400]} name="CTR" />
-                      <Tooltip
-                        cursor={{ strokeDasharray: "3 3" }}
-                        formatter={(value, name) => {
-                          if (name === "지출") return [formatMetricValue("cost", Number(value)), name];
-                          if (name === "CTR") return [`${Number(value).toFixed(2)}%`, name];
-                          return [value, name];
-                        }}
-                      />
-                      <Scatter
-                        data={(data?.campaignSummary ?? []).map((c) => ({ cost: c.cost ?? 0, conversions: c.conversions ?? 0, ctr: (c.ctr ?? 0) * 100, name: c.campaignName }))}
-                        fill="#0ea5e9"
-                        fillOpacity={0.7}
-                        name="캠페인"
-                      />
-                    </ScatterChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
+              {(() => {
+                const scatterPoints = (data?.campaignSummary ?? []).map((c) => ({
+                  cost: c.cost ?? 0,
+                  conversions: c.conversions ?? 0,
+                  ctr: (c.ctr ?? 0) * 100,
+                  name: c.campaignName,
+                }));
+                const trendPoints = computeLogTrend(scatterPoints);
+                if (scatterPoints.length === 0) {
+                  return (
+                    <div className="flex h-52 flex-col items-center justify-center gap-2 text-muted-foreground">
+                      <BarChart3 className="h-8 w-8 opacity-25" />
+                      <p className="text-sm">캠페인 데이터가 없어요</p>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="h-52">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <XAxis
+                          type="number"
+                          dataKey="cost"
+                          name="지출"
+                          tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                          tickFormatter={(v) => formatMetricValue("cost", Number(v))}
+                          allowDuplicatedCategory={false}
+                        />
+                        <YAxis
+                          type="number"
+                          name="전환"
+                          tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                          width={52}
+                        />
+                        <ZAxis type="number" dataKey="ctr" range={[40, 400]} name="CTR" />
+                        <Tooltip
+                          cursor={{ strokeDasharray: "3 3" }}
+                          formatter={(value, name) => {
+                            if (name === "지출") return [formatMetricValue("cost", Number(value)), name];
+                            if (name === "CTR") return [`${Number(value).toFixed(2)}%`, name];
+                            if (name === "예상 전환" || name === "predicted") return [`${Number(value).toFixed(1)}`, "예상 전환"];
+                            return [value, name];
+                          }}
+                        />
+                        {trendPoints && (
+                          <Line
+                            type="monotone"
+                            data={trendPoints}
+                            dataKey="predicted"
+                            stroke="#10b981"
+                            strokeWidth={2}
+                            strokeDasharray="4 4"
+                            dot={false}
+                            isAnimationActive={false}
+                            name="예상 전환"
+                            legendType="none"
+                          />
+                        )}
+                        <Scatter
+                          data={scatterPoints}
+                          dataKey="conversions"
+                          fill="#0ea5e9"
+                          fillOpacity={0.7}
+                          name="캠페인"
+                        />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+                );
+              })()}
             </motion.section>
 
             {/* ⑤ 요일별 성과 히트맵 */}

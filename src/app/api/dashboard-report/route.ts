@@ -54,6 +54,10 @@ const VISITOR_DIMENSIONS = [
   },
 ] as const;
 
+const EMAIL_FIELD_CANDIDATES = [
+  "email", "이메일", "Email", "메일", "mail", "e-mail", "emailAddress", "email_address",
+] as const;
+
 const TIME_FIELD_CANDIDATES = [
   "createdAt",
   "created_at",
@@ -557,6 +561,51 @@ export async function POST(request: Request) {
     return { key: dimension.key, label: dimension.label, items, total: Array.from(counts.values()).reduce((sum, count) => sum + count, 0) };
   }).filter((section) => section.items.length > 0).slice(0, 4);
 
+  // Email domain TOP 10
+  const emailDomainCounts = new Map<string, number>();
+  for (const record of rangeRecords as CompositionRecord[]) {
+    const fieldAliases = fieldAliasesBySource.get(record.sourceId) ?? [];
+    const emails = pickValue(record.data, EMAIL_FIELD_CANDIDATES, fieldAliases);
+    for (const email of emails) {
+      const trimmed = email.trim().toLowerCase();
+      const atIndex = trimmed.lastIndexOf("@");
+      if (atIndex < 1 || atIndex === trimmed.length - 1) continue;
+      const domain = trimmed.slice(atIndex + 1);
+      if (!domain.includes(".")) continue;
+      emailDomainCounts.set(domain, (emailDomainCounts.get(domain) ?? 0) + 1);
+    }
+  }
+  const emailDomainTotal = Array.from(emailDomainCounts.values()).reduce((s, c) => s + c, 0);
+  const emailDomainTop = Array.from(emailDomainCounts.entries())
+    .map(([domain, count]) => ({
+      domain,
+      count,
+      percent: emailDomainTotal > 0 ? (count / emailDomainTotal) * 100 : 0,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  // Unique vs duplicate email (within range)
+  const emailSeen = new Map<string, number>();
+  let recordsWithEmail = 0;
+  for (const record of rangeRecords as CompositionRecord[]) {
+    const fieldAliases = fieldAliasesBySource.get(record.sourceId) ?? [];
+    const emails = pickValue(record.data, EMAIL_FIELD_CANDIDATES, fieldAliases);
+    if (emails.length === 0) continue;
+    const email = emails[0].trim().toLowerCase();
+    if (!email || !email.includes("@")) continue;
+    recordsWithEmail += 1;
+    emailSeen.set(email, (emailSeen.get(email) ?? 0) + 1);
+  }
+  const uniqueEmails = emailSeen.size;
+  const duplicateRecords = recordsWithEmail - uniqueEmails;
+  const dedup = {
+    totalRecordsWithEmail: recordsWithEmail,
+    uniqueEmails,
+    duplicateRecords,
+    uniqueRatio: recordsWithEmail > 0 ? uniqueEmails / recordsWithEmail : null,
+  };
+
   const utmCols = getUtmColumns(filters);
   const utmRows = utmGroups
     .map((group) => {
@@ -593,6 +642,31 @@ export async function POST(request: Request) {
 
   const rangeChange = previousRangeCount > 0 ? ((rangeCount - previousRangeCount) / previousRangeCount) * 100 : null;
 
+  // Anomaly detection
+  const cumulativeTrend = buildCumulativeTrend(heatmapRecords, from, to, cumulativeBeforeRange);
+  const dailyCounts = cumulativeTrend.map((p) => p.count);
+  let anomaly: null | { date: string; count: number; avg: number; severity: "low" | "high"; deviation: number } = null;
+  if (dailyCounts.length >= 7) {
+    const recent = cumulativeTrend[cumulativeTrend.length - 1];
+    const baseline = dailyCounts.slice(-8, -1);
+    if (baseline.length >= 5) {
+      const avg = baseline.reduce((s, c) => s + c, 0) / baseline.length;
+      const variance = baseline.reduce((s, c) => s + (c - avg) ** 2, 0) / baseline.length;
+      const sd = Math.sqrt(variance);
+      const threshold = Math.max(sd * 1.5, avg * 0.25);
+      const diff = recent.count - avg;
+      if (Math.abs(diff) >= threshold && avg > 0) {
+        anomaly = {
+          date: recent.date,
+          count: recent.count,
+          avg: Math.round(avg * 10) / 10,
+          severity: diff < 0 ? "low" : "high",
+          deviation: Math.round((diff / avg) * 100),
+        };
+      }
+    }
+  }
+
   return NextResponse.json({
     generatedAt: now.toISOString(),
     project: { id: project.id, name: project.name },
@@ -605,7 +679,11 @@ export async function POST(request: Request) {
       rangeChange,
     },
     composition,
-    cumulativeTrend: buildCumulativeTrend(heatmapRecords, from, to, cumulativeBeforeRange),
+    emailDomainTop,
+    emailDomainTotal,
+    dedup,
+    anomaly,
+    cumulativeTrend,
     dailyUtmTrend: buildDailyUtmTrend(heatmapRecords as unknown as UtmTrendRecord[], from, to, filters?.attribution === "first"),
     utmTop,
     utmBySource,

@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, CalendarDays, Clock3, TrendingUp, Users } from "lucide-react";
+import { Activity, CalendarDays, Clock3, Mail, TrendingUp, UserCheck, Users } from "lucide-react";
 import type { ElementType } from "react";
 import { useState } from "react";
 import { motion } from "framer-motion";
@@ -59,6 +59,21 @@ export interface RealtimeReportData {
     peakHour: { hour: number; count: number };
     topSlots: Array<{ day: string; hour: number; count: number }>;
   };
+  emailDomainTop: Array<{ domain: string; count: number; percent: number }>;
+  emailDomainTotal: number;
+  dedup: {
+    totalRecordsWithEmail: number;
+    uniqueEmails: number;
+    duplicateRecords: number;
+    uniqueRatio: number | null;
+  };
+  anomaly: null | {
+    date: string;
+    count: number;
+    avg: number;
+    severity: "low" | "high";
+    deviation: number;
+  };
 }
 
 interface Props {
@@ -77,12 +92,20 @@ function formatPercent(value: number | null) {
   return `${sign}${value.toFixed(1)}%`;
 }
 
-function MetricCard({ label, value, helper, icon: Icon }: {
+function MetricCard({ label, value, helper, icon: Icon, badge }: {
   label: string;
   value: string;
   helper: string;
   icon: ElementType;
+  badge?: { label: string; tone: "warning" | "good" | "danger" };
 }) {
+  const toneClass = badge
+    ? badge.tone === "warning"
+      ? "bg-amber-500/10 text-amber-600"
+      : badge.tone === "good"
+        ? "bg-emerald-500/10 text-emerald-600"
+        : "bg-red-500/10 text-red-600"
+    : "";
   return (
     <div className="rounded-2xl border border-border bg-background px-4 py-3">
       <div className="flex items-center justify-between gap-2">
@@ -90,8 +113,101 @@ function MetricCard({ label, value, helper, icon: Icon }: {
         <Icon className="w-4 h-4 text-violet-500" />
       </div>
       <div className="mt-2 text-2xl font-semibold tracking-tight">{value}</div>
+      {badge && (
+        <motion.span
+          initial={{ opacity: 0, y: -2 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={spring}
+          className={`mt-1.5 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${toneClass}`}
+        >
+          {badge.label}
+        </motion.span>
+      )}
       <p className="mt-1 text-xs text-muted-foreground">{helper}</p>
     </div>
+  );
+}
+
+function getKstDateKey(date: Date): string {
+  const kst = new Date(date.getTime() + 9 * 60 * 60_000);
+  return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, "0")}-${String(kst.getUTCDate()).padStart(2, "0")}`;
+}
+
+function EmailDomainSection({ items, total }: { items: RealtimeReportData["emailDomainTop"]; total: number }) {
+  return (
+    <section className="rounded-[24px] border border-border bg-background p-5">
+      <div className="mb-4 flex items-center gap-2">
+        <Mail className="w-4 h-4 text-violet-500" />
+        <h3 className="text-sm font-semibold">이메일 도메인</h3>
+      </div>
+      <p className="mb-3 text-xs text-muted-foreground">등록자 회사·기관 분포 (TOP 10)</p>
+      {total > 0 && items.length > 0 ? (
+        <div className="space-y-2.5">
+          {items.map((item, index) => (
+            <div key={item.domain}>
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="shrink-0 font-semibold text-muted-foreground">#{index + 1}</span>
+                  <span className="truncate font-medium">{item.domain}</span>
+                </div>
+                <span className="shrink-0 font-mono font-semibold">{formatNumber(item.count)}건</span>
+              </div>
+              <div className="mt-1.5 h-1.5 rounded-full bg-secondary overflow-hidden">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${Math.min(item.percent, 100)}%` }}
+                  transition={spring}
+                  className="h-full rounded-full bg-violet-500/70"
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="rounded-2xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+          등록자 이메일 정보가 없어요
+        </p>
+      )}
+    </section>
+  );
+}
+
+function DedupCard({ dedup }: { dedup: RealtimeReportData["dedup"] }) {
+  if (dedup.totalRecordsWithEmail === 0) return null;
+  const uniquePct = dedup.uniqueRatio !== null ? dedup.uniqueRatio * 100 : 0;
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={spring}
+      className="rounded-2xl border border-border bg-background p-5"
+    >
+      <div className="mb-3 flex items-center gap-2">
+        <UserCheck className="w-4 h-4 text-violet-500" />
+        <h3 className="text-sm font-semibold">신규 vs 중복</h3>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <p className="text-xs text-muted-foreground">신규 이메일</p>
+          <p className="mt-1 text-xl font-semibold text-emerald-600">{formatNumber(dedup.uniqueEmails)}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-muted-foreground">재등록</p>
+          <p className="mt-1 text-xl font-semibold text-muted-foreground">{formatNumber(dedup.duplicateRecords)}</p>
+        </div>
+      </div>
+      <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-secondary">
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${uniquePct}%` }}
+          transition={spring}
+          className="h-full bg-emerald-500/80"
+        />
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        기간 내 이메일 보유 등록 {formatNumber(dedup.totalRecordsWithEmail)}건 중
+      </p>
+    </motion.section>
   );
 }
 
@@ -459,6 +575,19 @@ export default function RealtimeReport({ data, loading, rangeLabel }: Props) {
 
   if (!data) return null;
 
+  const now = new Date();
+  const todayKey = getKstDateKey(now);
+  const yesterdayKey = getKstDateKey(new Date(now.getTime() - 86_400_000));
+  const anomaly = data.anomaly;
+  const anomalyBadge = anomaly
+    ? {
+        label: `평소 대비 ${anomaly.deviation > 0 ? "+" : ""}${anomaly.deviation}% ${anomaly.severity === "low" ? "낮음" : "높음"}`,
+        tone: (anomaly.severity === "low" ? "danger" : "good") as "danger" | "good",
+      }
+    : undefined;
+  const yesterdayBadge = anomaly && anomaly.date === yesterdayKey ? anomalyBadge : undefined;
+  const todayBadge = anomaly && anomaly.date === todayKey ? anomalyBadge : undefined;
+
   return (
     <section className="space-y-4">
       <div className="rounded-[28px] border border-border bg-secondary/10 p-5 md:p-6">
@@ -473,8 +602,8 @@ export default function RealtimeReport({ data, loading, rangeLabel }: Props) {
         </div>
 
         <div className="mt-5 grid gap-3 md:grid-cols-3">
-          <MetricCard icon={CalendarDays} label="어제 등록 수" value={`${formatNumber(data.performance.yesterdayCount)}건`} helper="KST 기준 전일 00:00-24:00" />
-          <MetricCard icon={Activity} label="당일 실시간 등록 수" value={`${formatNumber(data.performance.todayCount)}건`} helper="오늘 00:00부터 현재까지" />
+          <MetricCard icon={CalendarDays} label="어제 등록 수" value={`${formatNumber(data.performance.yesterdayCount)}건`} helper="KST 기준 전일 00:00-24:00" badge={yesterdayBadge} />
+          <MetricCard icon={Activity} label="당일 실시간 등록 수" value={`${formatNumber(data.performance.todayCount)}건`} helper="오늘 00:00부터 현재까지" badge={todayBadge} />
           <MetricCard icon={TrendingUp} label="누적 등록 수" value={`${formatNumber(data.performance.cumulativeCount)}건`} helper="프로젝트 전체 누적" />
         </div>
 
@@ -484,6 +613,12 @@ export default function RealtimeReport({ data, loading, rangeLabel }: Props) {
           <span className="font-semibold">{formatNumber(data.performance.rangeCount)}건</span>
           <ChangeBadge rangeChange={data.performance.rangeChange} />
         </div>
+
+        {data.dedup.totalRecordsWithEmail > 0 && (
+          <div className="mt-4">
+            <DedupCard dedup={data.dedup} />
+          </div>
+        )}
 
         <div className="mt-4">
           <CumulativeLineChart points={data.cumulativeTrend} />
@@ -514,6 +649,8 @@ export default function RealtimeReport({ data, loading, rangeLabel }: Props) {
 
         <UtmBreakdownSection data={data} />
       </div>
+
+      <EmailDomainSection items={data.emailDomainTop} total={data.emailDomainTotal} />
 
       <section className="rounded-[24px] border border-border bg-background p-5">
         <div className="flex items-center gap-2 mb-4">

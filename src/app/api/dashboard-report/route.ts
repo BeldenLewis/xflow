@@ -153,6 +153,42 @@ function buildWhere(params: {
   return where;
 }
 
+// Build a parameterized SQL WHERE fragment mirroring buildWhere.
+function buildRawWhere(params: {
+  workspaceId: string;
+  projectId: string;
+  filters?: ReportFilters;
+  from?: Date;
+  to?: Date;
+  lt?: Date;
+}): Prisma.Sql {
+  const { workspaceId, projectId, filters, from, to, lt } = params;
+  const utm = getUtmColumns(filters);
+  const conds: Prisma.Sql[] = [
+    Prisma.sql`"workspaceId" = ${workspaceId}`,
+    Prisma.sql`"projectId" = ${projectId}`,
+  ];
+  if (filters?.sourceId && filters.sourceId !== "all") {
+    conds.push(Prisma.sql`"sourceId" = ${filters.sourceId}`);
+  }
+  if (filters?.utmSource) {
+    if (utm.source === "firstUtmSource") conds.push(Prisma.sql`"firstUtmSource" = ${filters.utmSource}`);
+    else conds.push(Prisma.sql`"utmSource" = ${filters.utmSource}`);
+  }
+  if (filters?.utmMedium) {
+    if (utm.medium === "firstUtmMedium") conds.push(Prisma.sql`"firstUtmMedium" = ${filters.utmMedium}`);
+    else conds.push(Prisma.sql`"utmMedium" = ${filters.utmMedium}`);
+  }
+  if (filters?.utmCampaign) {
+    if (utm.campaign === "firstUtmCampaign") conds.push(Prisma.sql`"firstUtmCampaign" = ${filters.utmCampaign}`);
+    else conds.push(Prisma.sql`"utmCampaign" = ${filters.utmCampaign}`);
+  }
+  if (from) conds.push(Prisma.sql`"createdAt" >= ${from}`);
+  if (to) conds.push(Prisma.sql`"createdAt" <= ${to}`);
+  if (lt) conds.push(Prisma.sql`"createdAt" < ${lt}`);
+  return Prisma.join(conds, " AND ");
+}
+
 function normalizeKey(key: string) {
   return key.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
 }
@@ -332,6 +368,126 @@ function cleanUtmValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function buildHeatmapFromRows(rows: Array<{ dow: number; hour: number; count: number }>) {
+  const dayLabels = ["월", "화", "수", "목", "금", "토", "일"];
+  const matrix: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
+  const dayTotals = Array(7).fill(0) as number[];
+  const hourTotals = Array(24).fill(0) as number[];
+
+  for (const row of rows) {
+    // Postgres DOW: 0=Sunday..6=Saturday. We want 0=Mon..6=Sun.
+    const dayIndex = (row.dow + 6) % 7;
+    const hour = row.hour;
+    if (dayIndex < 0 || dayIndex > 6 || hour < 0 || hour > 23) continue;
+    matrix[dayIndex][hour] += row.count;
+    dayTotals[dayIndex] += row.count;
+    hourTotals[hour] += row.count;
+  }
+
+  const max = matrix.flat().reduce((peak, count) => Math.max(peak, count), 0);
+  const peakDayIndex = dayTotals.reduce((best, count, index) => count > dayTotals[best] ? index : best, 0);
+  const peakHour = hourTotals.reduce((best, count, index) => count > hourTotals[best] ? index : best, 0);
+  const topSlots = matrix
+    .flatMap((row, dayIndex) => row.map((count, hour) => ({ day: dayLabels[dayIndex], hour, count })))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  return {
+    dayLabels,
+    matrix,
+    max,
+    peakDay: { label: dayLabels[peakDayIndex], count: dayTotals[peakDayIndex] ?? 0 },
+    peakHour: { hour: peakHour, count: hourTotals[peakHour] ?? 0 },
+    topSlots,
+  };
+}
+
+function buildCumulativeTrendFromRows(
+  rows: Array<{ day: string; count: number }>,
+  from: Date,
+  to: Date,
+  initialCount: number,
+) {
+  const dailyCounts = new Map<string, number>();
+  for (const row of rows) {
+    // row.day is already a KST date string yyyy-mm-dd
+    dailyCounts.set(row.day, (dailyCounts.get(row.day) ?? 0) + row.count);
+  }
+  const points: Array<{ date: string; label: string; count: number; cumulative: number }> = [];
+  let cumulative = initialCount;
+  let cursor = getKstDayStart(from);
+  const end = getKstDayStart(to);
+  while (cursor.getTime() <= end.getTime()) {
+    const date = getKstDateKey(cursor);
+    const count = dailyCounts.get(date) ?? 0;
+    cumulative += count;
+    points.push({
+      date,
+      label: date.slice(5).replace("-", "."),
+      count,
+      cumulative,
+    });
+    cursor = new Date(cursor.getTime() + DAY_MS);
+  }
+  return points;
+}
+
+function buildDailyUtmTrendFromRows(
+  rows: Array<{ day: string; source: string | null; medium: string | null; count: number }>,
+  from: Date,
+  to: Date,
+): { source: DailyUtmView; medium: DailyUtmView; combined: DailyUtmView } {
+  const TOP = 5;
+
+  const getKey = (row: { source: string | null; medium: string | null }, dimension: "source" | "medium" | "combined") => {
+    const src = row.source ?? "";
+    const med = row.medium ?? "";
+    if (dimension === "source") return src;
+    if (dimension === "medium") return med;
+    return [src, med].filter(Boolean).join(" / ");
+  };
+
+  const buildView = (dimension: "source" | "medium" | "combined"): DailyUtmView => {
+    const totals = new Map<string, number>();
+    const daily = new Map<string, Map<string, number>>();
+
+    for (const row of rows) {
+      const key = getKey(row, dimension);
+      if (!key) continue;
+      const date = row.day;
+      totals.set(key, (totals.get(key) ?? 0) + row.count);
+      if (!daily.has(date)) daily.set(date, new Map());
+      const dayMap = daily.get(date)!;
+      dayMap.set(key, (dayMap.get(key) ?? 0) + row.count);
+    }
+
+    const topKeys = Array.from(totals.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, TOP)
+      .map(([k]) => k);
+
+    const rowsOut: DailyUtmRow[] = [];
+    let cursor = getKstDayStart(from);
+    const end = getKstDayStart(to);
+    while (cursor.getTime() <= end.getTime()) {
+      const date = getKstDateKey(cursor);
+      const dayMap = daily.get(date) ?? new Map<string, number>();
+      const row: DailyUtmRow = { date };
+      for (const key of topKeys) row[key] = dayMap.get(key) ?? 0;
+      rowsOut.push(row);
+      cursor = new Date(cursor.getTime() + DAY_MS);
+    }
+
+    return { topKeys, rows: rowsOut };
+  };
+
+  return {
+    source: buildView("source"),
+    medium: buildView("medium"),
+    combined: buildView("combined"),
+  };
+}
+
 function buildHeatmap(records: TimedRecord[]) {
   const dayLabels = ["월", "화", "수", "목", "금", "토", "일"];
   const matrix: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
@@ -506,14 +662,20 @@ export async function POST(request: Request) {
 
   const baseParams = { workspaceId, projectId, filters };
   const rangeWhere = buildWhere({ ...baseParams, from, to });
+  const rangeRawWhere = buildRawWhere({ ...baseParams, from, to });
+  const utmCols = getUtmColumns(filters);
+  const utmSourceCol = utmCols.source === "firstUtmSource" ? Prisma.sql`"firstUtmSource"` : Prisma.sql`"utmSource"`;
+  const utmMediumCol = utmCols.medium === "firstUtmMedium" ? Prisma.sql`"firstUtmMedium"` : Prisma.sql`"utmMedium"`;
 
-  const [yesterdayCount, todayCount, cumulativeCount, rangeCount, previousRangeCount, cumulativeBeforeRange, heatmapRecords, utmGroups, sourceFields] = await Promise.all([
+  const [yesterdayCount, todayCount, cumulativeCount, rangeCount, previousRangeCount, cumulativeBeforeRange, heatmapRecords, utmGroups, sourceFields, heatmapRows, cumulativeDailyRows, utmTrendRows] = await Promise.all([
     prisma.collectRecord.count({ where: buildWhere({ ...baseParams, from: yesterdayStart, lt: todayStart }) }),
     prisma.collectRecord.count({ where: buildWhere({ ...baseParams, from: todayStart, to: now }) }),
     prisma.collectRecord.count({ where: buildWhere(baseParams) }),
     prisma.collectRecord.count({ where: rangeWhere }),
     prisma.collectRecord.count({ where: buildWhere({ ...baseParams, from: previousFrom, lt: from }) }),
     prisma.collectRecord.count({ where: buildWhere({ ...baseParams, lt: from }) }),
+    // NOTE: in-memory fetch retained for composition / emailDomainTop / dedup
+    // (requires JSON parsing with source-specific field aliases). Capped at 50k.
     prisma.collectRecord.findMany({
       where: rangeWhere,
       select: { sourceId: true, createdAt: true, data: true, utmSource: true, utmMedium: true, firstUtmSource: true, firstUtmMedium: true },
@@ -540,6 +702,37 @@ export async function POST(request: Request) {
         fieldMappings: { select: { key: true, label: true } },
       },
     }),
+    // Heatmap: KST day-of-week + hour aggregation in SQL.
+    prisma.$queryRaw<Array<{ dow: number; hour: number; count: number }>>`
+      SELECT
+        (EXTRACT(DOW FROM ("createdAt" + INTERVAL '9 hours')))::int AS dow,
+        (EXTRACT(HOUR FROM ("createdAt" + INTERVAL '9 hours')))::int AS hour,
+        COUNT(*)::int AS count
+      FROM "CollectRecord"
+      WHERE ${rangeRawWhere}
+      GROUP BY dow, hour
+    `,
+    // Cumulative daily counts (KST).
+    prisma.$queryRaw<Array<{ day: string; count: number }>>`
+      SELECT
+        TO_CHAR(DATE_TRUNC('day', "createdAt" + INTERVAL '9 hours'), 'YYYY-MM-DD') AS day,
+        COUNT(*)::int AS count
+      FROM "CollectRecord"
+      WHERE ${rangeRawWhere}
+      GROUP BY day
+      ORDER BY day
+    `,
+    // Daily UTM trend (source + medium pair, per KST day).
+    prisma.$queryRaw<Array<{ day: string; source: string | null; medium: string | null; count: number }>>`
+      SELECT
+        TO_CHAR(DATE_TRUNC('day', "createdAt" + INTERVAL '9 hours'), 'YYYY-MM-DD') AS day,
+        ${utmSourceCol} AS source,
+        ${utmMediumCol} AS medium,
+        COUNT(*)::int AS count
+      FROM "CollectRecord"
+      WHERE ${rangeRawWhere}
+      GROUP BY day, source, medium
+    `,
   ]);
 
   const fieldAliasesBySource = buildFieldAliasLookup(sourceFields);
@@ -600,7 +793,6 @@ export async function POST(request: Request) {
     uniqueRatio: recordsWithEmail > 0 ? uniqueEmails / recordsWithEmail : null,
   };
 
-  const utmCols = getUtmColumns(filters);
   const utmRows = utmGroups
     .map((group) => {
       const source = cleanUtmValue(group[utmCols.source]);
@@ -637,7 +829,7 @@ export async function POST(request: Request) {
   const rangeChange = previousRangeCount > 0 ? ((rangeCount - previousRangeCount) / previousRangeCount) * 100 : null;
 
   // Anomaly detection
-  const cumulativeTrend = buildCumulativeTrend(heatmapRecords, from, to, cumulativeBeforeRange);
+  const cumulativeTrend = buildCumulativeTrendFromRows(cumulativeDailyRows, from, to, cumulativeBeforeRange);
   const dailyCounts = cumulativeTrend.map((p) => p.count);
   let anomaly: null | { date: string; count: number; avg: number; severity: "low" | "high"; deviation: number } = null;
   if (dailyCounts.length >= 7) {
@@ -678,11 +870,11 @@ export async function POST(request: Request) {
     dedup,
     anomaly,
     cumulativeTrend,
-    dailyUtmTrend: buildDailyUtmTrend(heatmapRecords as unknown as UtmTrendRecord[], from, to, filters?.attribution === "first"),
+    dailyUtmTrend: buildDailyUtmTrendFromRows(utmTrendRows, from, to),
     utmTop,
     utmBySource,
     utmByMedium,
     utmBySourceMedium,
-    heatmap: buildHeatmap(heatmapRecords),
+    heatmap: buildHeatmapFromRows(heatmapRows),
   });
 }

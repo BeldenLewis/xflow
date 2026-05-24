@@ -29,8 +29,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   const { searchParams } = new URL(request.url);
   const page = parseInt(searchParams.get("page") ?? "1");
-  const rawLimit = parseInt(searchParams.get("limit") ?? "10000");
-  const limit = Math.min(Math.max(rawLimit, 1), 10000);
+  const rawLimit = parseInt(searchParams.get("limit") ?? "100");
+  const limit = Math.min(Math.max(rawLimit || 100, 1), 500);
   const skip = (page - 1) * limit;
   const q = searchParams.get("q")?.trim();
   const utmSource = searchParams.get("utmSource");

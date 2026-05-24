@@ -284,6 +284,10 @@ model CollectRecord {
   workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([sourceId, createdAt(sort: Desc)])
+  @@index([projectId, createdAt])
+  @@index([projectId, utmSource])
+  @@index([projectId, utmMedium])
+  @@index([projectId, sourceId, createdAt])
 }
 
 model ActivityLog {

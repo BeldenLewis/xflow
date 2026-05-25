@@ -6,16 +6,39 @@ const nextConfig: NextConfig = {
 };
 
 export default withSentryConfig(nextConfig, {
-  // 빌드시 Sentry 옵션
-  org: process.env.SENTRY_ORG,
-  project: process.env.SENTRY_PROJECT,
+  // For all available options, see:
+  // https://www.npmjs.com/package/@sentry/webpack-plugin#options
+
+  org: "mach-studio",
+
+  project: "javascript-nextjs",
+
+  // Only print logs for uploading source maps in CI
   silent: !process.env.CI,
-  // 광고차단 우회용 터널 라우트 (선택)
-  tunnelRoute: "/monitoring",
-  // 클라이언트 파일 업로드 범위 확장
+
+  // For all available options, see:
+  // https://docs.sentry.io/platforms/javascript/guides/nextjs/manual-setup/
+
+  // Upload a larger set of source maps for prettier stack traces (increases build time)
   widenClientFileUpload: true,
-  // React 컴포넌트 에러를 소스맵과 연결
-  reactComponentAnnotation: { enabled: true },
-  // SDK 로거 비활성 (번들 사이즈 절약)
-  disableLogger: true,
+
+  // Route browser requests to Sentry through a Next.js rewrite to circumvent ad-blockers.
+  // This can increase your server load as well as your hosting bill.
+  // Note: Check that the configured route will not match with your Next.js middleware, otherwise reporting of client-
+  // side errors will fail.
+  tunnelRoute: "/monitoring",
+
+  webpack: {
+    // Enables automatic instrumentation of Vercel Cron Monitors. (Does not yet work with App Router route handlers.)
+    // See the following for more information:
+    // https://docs.sentry.io/product/crons/
+    // https://vercel.com/docs/cron-jobs
+    automaticVercelMonitors: true,
+
+    // Tree-shaking options for reducing bundle size
+    treeshake: {
+      // Automatically tree-shake Sentry logger statements to reduce bundle size
+      removeDebugLogging: true,
+    },
+  }
 });

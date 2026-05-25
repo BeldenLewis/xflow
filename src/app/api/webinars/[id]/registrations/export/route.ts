@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const supabase = await createClient();
@@ -39,6 +40,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const csv = [headers, ...rows]
     .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
     .join("\n");
+
+  await logActivity({
+    workspaceId: webinar.workspaceId,
+    userId: user.id,
+    action: "webinar.registrations.exported",
+    meta: { webinarId: id, webinarSlug: webinar.slug, format: "csv", recordCount: registrations.length },
+  });
 
   return new NextResponse("﻿" + csv, {
     headers: {

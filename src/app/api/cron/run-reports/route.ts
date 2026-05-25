@@ -2,6 +2,26 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cronMatchesKst, nextRunFromNow } from "@/lib/cron";
 import { formatKstDateTime, kstDateString } from "@/lib/datetime";
+import { isSafePublicUrl } from "@/lib/url-safety";
+import { logActivity } from "@/lib/activity";
+
+interface ReportRow {
+  id: string;
+  name: string;
+  channel: string;
+  target: string;
+  workspaceId: string;
+}
+
+async function logDelivery(report: ReportRow, ok: boolean, error?: string) {
+  await logActivity({
+    workspaceId: report.workspaceId,
+    action: ok ? "scheduledReport.delivered" : "scheduledReport.delivery_failed",
+    meta: ok
+      ? { reportId: report.id, channel: report.channel, name: report.name }
+      : { reportId: report.id, channel: report.channel, name: report.name, error: error ?? "unknown" },
+  });
+}
 
 // Vercel Cron 또는 외부 호출자가 매 분 호출.
 // 보호: CRON_SECRET 환경변수 일치하는 경우만 실행.
@@ -43,9 +63,19 @@ export async function GET(request: Request) {
         where: { id: r.id },
         data: { lastRunAt: now, nextRunAt: nextRunFromNow(r.cron, new Date(now.getTime() + 60_000)) },
       });
+      await logDelivery(
+        { id: r.id, name: r.name, channel: r.channel, target: r.target, workspaceId: r.workspaceId },
+        true,
+      );
       fired.push({ id: r.id, name: r.name, ok: true });
     } catch (e) {
-      fired.push({ id: r.id, name: r.name, ok: false, error: e instanceof Error ? e.message : String(e) });
+      const msg = e instanceof Error ? e.message : String(e);
+      await logDelivery(
+        { id: r.id, name: r.name, channel: r.channel, target: r.target, workspaceId: r.workspaceId },
+        false,
+        msg,
+      );
+      fired.push({ id: r.id, name: r.name, ok: false, error: msg });
     }
   }
 
@@ -108,15 +138,66 @@ async function sendReport(report: ReportWithDashboard) {
   ].join("\n");
 
   if (report.channel === "slack") {
-    const res = await fetch(report.target, {
+    // SSRF 방어: Slack webhook 호스트 제한 + 사설 IP 차단.
+    const safe = isSafePublicUrl(report.target);
+    if (!safe.ok || !safe.url) {
+      throw new Error(`Slack webhook URL 차단됨: ${safe.reason ?? "invalid"}`);
+    }
+    if (safe.url.hostname !== "hooks.slack.com") {
+      throw new Error(`Slack webhook 호스트가 아니에요: ${safe.url.hostname}`);
+    }
+
+    // Slack blocks 포맷 — 텍스트 fallback 도 함께 전송.
+    const blocks = [
+      {
+        type: "header",
+        text: { type: "plain_text", text: `📊 ${dash.project.name} — ${report.name}` },
+      },
+      {
+        type: "context",
+        elements: [
+          { type: "mrkdwn", text: `기간: ${kstDateString(from)} ~ ${kstDateString(now)} (KST)` },
+        ],
+      },
+      {
+        type: "section",
+        fields: [
+          { type: "mrkdwn", text: `*총 제출*\n${totalCount.toLocaleString()}건${change !== null ? ` (${change}%)` : ""}` },
+          { type: "mrkdwn", text: `*지난 주*\n${prevCount.toLocaleString()}건` },
+        ],
+      },
+      ...(top.length
+        ? [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `*상위 UTM 소스*\n${top.map(([k, v], i) => `${i + 1}. ${k}: ${v.toLocaleString()}건`).join("\n")}`,
+              },
+            },
+          ]
+        : []),
+      {
+        type: "context",
+        elements: [{ type: "mrkdwn", text: `발송: ${formatKstDateTime(now)} KST` }],
+      },
+    ];
+
+    const res = await fetch(safe.url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: summary }),
+      body: JSON.stringify({ text: summary, blocks }),
       signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) throw new Error(`Slack ${res.status}`);
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Slack ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
+    }
   } else if (report.channel === "email") {
-    // TODO: 이메일 발송 (Resend 등). 현재는 로깅만.
-    console.log("[scheduled-report] email send (placeholder):", report.target, summary);
+    // 이메일 발송은 별도 구현 예정 (Resend 등 외부 공급자 통합 필요).
+    // 현재는 미구현으로 명시적 에러 던져 ActivityLog 에 기록.
+    throw new Error("email channel 미구현");
+  } else {
+    throw new Error(`알 수 없는 channel: ${report.channel}`);
   }
 }

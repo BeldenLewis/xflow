@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -19,5 +20,13 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   }
 
   await prisma.apiToken.delete({ where: { id } });
+
+  await logActivity({
+    workspaceId: token.workspaceId,
+    userId: user.id,
+    action: "apiToken.revoked",
+    meta: { tokenId: id, tokenName: token.name, prefix: token.prefix },
+  });
+
   return NextResponse.json({ ok: true });
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { formatKstDateTime, kstDateString } from "@/lib/datetime";
+import { logActivity } from "@/lib/activity";
 
 function csvEscape(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -68,6 +69,14 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
   const safeName = (source.name || "collect").replace(/[^a-zA-Z0-9가-힣_-]+/g, "_");
   const filename = `${safeName}_${kstDateString()}.csv`;
+
+  await logActivity({
+    workspaceId: source.workspaceId,
+    sourceId: source.id,
+    userId: user.id,
+    action: "collect.records.exported",
+    meta: { sourceId: source.id, format: "csv", recordCount: records.length },
+  });
 
   return new NextResponse(body, {
     status: 200,

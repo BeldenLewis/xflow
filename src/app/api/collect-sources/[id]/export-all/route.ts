@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { kstDateString } from "@/lib/datetime";
+import { logActivity } from "@/lib/activity";
 
 // 소스 전체 백업 — 설정 + 필드 매핑 + 모든 레코드 JSON 한 파일로 다운로드.
 // 나중에 import-all 로 복구 가능.
@@ -57,6 +58,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   };
 
   const filename = `mach-backup-${source.name.replace(/[^a-zA-Z0-9가-힣_-]+/g, "_")}-${kstDateString()}.json`;
+
+  await logActivity({
+    workspaceId: source.workspaceId,
+    sourceId: source.id,
+    userId: user.id,
+    action: "collect.records.exported",
+    meta: { sourceId: source.id, format: "json", recordCount: records.length, backup: true },
+  });
+
   return new NextResponse(JSON.stringify(backup, null, 2), {
     headers: {
       "Content-Type": "application/json; charset=utf-8",

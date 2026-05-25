@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 async function requireMembership(userId: string, workspaceId: string) {
   return prisma.workspaceMember.findUnique({
@@ -84,6 +85,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     },
   });
 
+  await logActivity({
+    workspaceId: id,
+    userId: user.id,
+    action: "workspace.member.invited",
+    meta: { email, role, invitationId: invitation.id, targetUserId: invitedUser.id },
+  });
+
   return NextResponse.json({ ok: true });
 }
 
@@ -128,6 +136,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     },
   });
 
+  await logActivity({
+    workspaceId: id,
+    userId: user.id,
+    action: "workspace.member.role_changed",
+    meta: { targetUserId: target.userId, memberId, oldRole: target.role, newRole: role },
+  });
+
   return NextResponse.json({ member: updated });
 }
 
@@ -164,6 +179,13 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       type: "MEMBER_REMOVED",
       data: { workspaceId: id, workspaceName: workspace?.name ?? "" },
     },
+  });
+
+  await logActivity({
+    workspaceId: id,
+    userId: user.id,
+    action: "workspace.member.removed",
+    meta: { targetUserId: target.userId, memberId, role: target.role },
   });
 
   return NextResponse.json({ ok: true });

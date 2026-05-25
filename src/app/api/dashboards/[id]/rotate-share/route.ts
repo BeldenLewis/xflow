@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { randomBytes } from "node:crypto";
+import { logActivity } from "@/lib/activity";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -21,6 +22,13 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const updated = await prisma.dashboard.update({
     where: { id },
     data: { shareToken: newToken, shareEnabled: true },
+  });
+
+  await logActivity({
+    workspaceId: dashboard.workspaceId,
+    userId: user.id,
+    action: "dashboardShareToken.rotated",
+    meta: { dashboardId: id, dashboardName: dashboard.name },
   });
 
   return NextResponse.json({ shareToken: updated.shareToken });

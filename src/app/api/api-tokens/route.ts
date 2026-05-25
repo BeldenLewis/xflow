@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { generateToken } from "@/lib/pat";
+import { logActivity } from "@/lib/activity";
 
 export async function GET(request: Request) {
   const supabase = await createClient();
@@ -53,6 +54,19 @@ export async function POST(request: Request) {
       prefix,
       scopes: Array.isArray(scopes) ? scopes : [],
       expiresAt,
+    },
+  });
+
+  await logActivity({
+    workspaceId,
+    userId: user.id,
+    action: "apiToken.created",
+    meta: {
+      tokenId: created.id,
+      tokenName: created.name,
+      scopes: created.scopes,
+      prefix: created.prefix,
+      expiresAt: created.expiresAt?.toISOString() ?? null,
     },
   });
 

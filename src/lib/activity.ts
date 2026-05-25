@@ -11,7 +11,18 @@ export type ActivityAction =
   | "records.bulk_deleted"
   | "records.imported"
   | "records.cleaned"
-  | "records.normalized";
+  | "records.normalized"
+  | "records.exported"
+  | "collect.records.exported"
+  | "workspace.member.invited"
+  | "workspace.member.role_changed"
+  | "workspace.member.removed"
+  | "apiToken.created"
+  | "apiToken.revoked"
+  | "dashboardShareToken.rotated"
+  | "webinar.registrations.exported"
+  | "scheduledReport.delivered"
+  | "scheduledReport.delivery_failed";
 
 export async function logActivity(args: {
   workspaceId: string;

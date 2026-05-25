@@ -1,0 +1,10 @@
+import "dotenv/config";
+import { config } from "dotenv";
+import pg from "pg";
+config({ path: ".env.local" });
+const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+await client.connect();
+const r = await client.query(`SELECT indexname FROM pg_indexes WHERE schemaname='public' AND tablename='CollectRecord' ORDER BY indexname`);
+console.log("CollectRecord 인덱스:");
+for (const row of r.rows) console.log("  -", row.indexname);
+await client.end();

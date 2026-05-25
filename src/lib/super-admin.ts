@@ -3,7 +3,8 @@
 
 const FALLBACK_EMAIL = "lynlea@exporum.com";
 
-const ADMIN_EMAILS = (process.env.SUPER_ADMIN_EMAILS ?? FALLBACK_EMAIL)
+const ENV_VALUE = process.env.SUPER_ADMIN_EMAILS?.trim();
+const ADMIN_EMAILS = (ENV_VALUE && ENV_VALUE.length > 0 ? ENV_VALUE : FALLBACK_EMAIL)
   .split(",")
   .map((e) => e.trim().toLowerCase())
   .filter(Boolean);

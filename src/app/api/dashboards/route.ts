@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 export async function GET(request: Request) {
   const supabase = await createClient();
@@ -94,6 +95,13 @@ export async function POST(request: Request) {
       }
     }
   }
+
+  await logActivity({
+    workspaceId,
+    userId: user.id,
+    action: "dashboard.created",
+    meta: { dashboardId: dashboard.id, name: dashboard.name, projectId, cloneFromId: cloneFromId || null },
+  });
 
   return NextResponse.json({ dashboard }, { status: 201 });
 }

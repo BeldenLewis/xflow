@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 // 가입 직후 호출 — token 으로 미가입자 초대를 redeem.
 // 가입 시 사용한 이메일과 invitation.invitedEmail 이 일치해야 자동 멤버십 부여.
@@ -34,6 +35,13 @@ export async function POST(request: Request) {
       where: { id: invitation.id },
       data: { status: "ACCEPTED", invitedUserId: user.id },
     });
+  });
+
+  await logActivity({
+    workspaceId: invitation.workspaceId,
+    userId: user.id,
+    action: "invitation.redeemed",
+    meta: { invitationId: invitation.id, role: invitation.role },
   });
 
   return NextResponse.json({ ok: true, workspaceId: invitation.workspaceId });

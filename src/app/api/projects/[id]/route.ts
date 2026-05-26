@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 async function authorizeProject(projectId: string, userId: string) {
   const project = await prisma.project.findUnique({ where: { id: projectId } });
@@ -49,6 +50,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         description: typeof description === "string" && description.trim() ? description.trim() : null,
       }),
     },
+  });
+
+  await logActivity({
+    workspaceId: project.workspaceId,
+    userId: user.id,
+    action: "project.updated",
+    meta: { projectId: id, before: { name: project.name }, after: { name: updated.name } },
   });
 
   return NextResponse.json({ project: updated });

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
+import { logActivity } from "@/lib/activity";
 
 const MAX_IMPORT_ROWS = 20_000;
 const CREATE_CHUNK_SIZE = 1_000;
@@ -535,6 +536,20 @@ export async function POST(request: Request) {
       }
 
       return createdBatch;
+    });
+
+    await logActivity({
+      workspaceId,
+      userId: user.id,
+      action: "ad.batch_uploaded",
+      meta: {
+        batchId: batch.id,
+        sourceType,
+        sourceName: sourceName?.trim() || null,
+        fileName,
+        recordCount: sanitizedRows.length,
+        projectId,
+      },
     });
 
     return NextResponse.json({ batch }, { status: 201 });

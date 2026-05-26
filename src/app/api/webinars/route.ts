@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 export async function GET(request: Request) {
   const supabase = await createClient();
@@ -66,6 +67,13 @@ export async function POST(request: Request) {
       },
       config: {},
     },
+  });
+
+  await logActivity({
+    workspaceId,
+    userId: user.id,
+    action: "webinar.created",
+    meta: { webinarId: webinar.id, slug: webinar.slug, name: webinar.name, projectId },
   });
 
   return NextResponse.json({ webinar }, { status: 201 });

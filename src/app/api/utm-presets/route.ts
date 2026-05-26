@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 async function getWorkspaceId(workspaceId: string | null, userId: string) {
   if (workspaceId) return workspaceId;
@@ -48,6 +49,12 @@ export async function POST(request: Request) {
       where: { id: existing.id },
       data: { label: trimmedLabel },
     });
+    await logActivity({
+      workspaceId: wsId,
+      userId: user.id,
+      action: "utmPreset.updated",
+      meta: { presetId: updated.id, field, value: trimmedValue },
+    });
     return NextResponse.json({ preset: updated });
   }
 
@@ -60,6 +67,13 @@ export async function POST(request: Request) {
 
   const preset = await prisma.uTMPreset.create({
     data: { id: crypto.randomUUID(), workspaceId: wsId, field, value: trimmedValue, label: trimmedLabel, sortOrder },
+  });
+
+  await logActivity({
+    workspaceId: wsId,
+    userId: user.id,
+    action: "utmPreset.created",
+    meta: { presetId: preset.id, field, value: trimmedValue, label: trimmedLabel },
   });
 
   return NextResponse.json({ preset });
@@ -94,6 +108,12 @@ export async function PATCH(request: Request) {
         label: label?.trim() || null,
       },
     });
+    await logActivity({
+      workspaceId: updated.workspaceId,
+      userId: user.id,
+      action: "utmPreset.updated",
+      meta: { presetId: updated.id, field: updated.field, value: updated.value },
+    });
     return NextResponse.json({ preset: updated });
   } catch {
     return NextResponse.json({ error: "이미 존재하는 값이에요" }, { status: 409 });
@@ -106,7 +126,17 @@ export async function DELETE(request: Request) {
   if (!user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
   const { id } = await request.json();
+  const existing = await prisma.uTMPreset.findUnique({ where: { id } });
   await prisma.uTMPreset.delete({ where: { id } });
+
+  if (existing) {
+    await logActivity({
+      workspaceId: existing.workspaceId,
+      userId: user.id,
+      action: "utmPreset.deleted",
+      meta: { presetId: id, field: existing.field, value: existing.value },
+    });
+  }
 
   return NextResponse.json({ ok: true });
 }

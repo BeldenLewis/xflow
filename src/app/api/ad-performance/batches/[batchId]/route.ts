@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
+import { logActivity } from "@/lib/activity";
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ batchId: string }> }) {
   const { batchId } = await params;
@@ -24,5 +25,13 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   }
 
   await prisma.adPerformanceImportBatch.delete({ where: { id: batch.id } });
+
+  await logActivity({
+    workspaceId: batch.workspaceId,
+    userId: user.id,
+    action: "ad.batch_deleted",
+    meta: { batchId: batch.id },
+  });
+
   return NextResponse.json({ ok: true });
 }

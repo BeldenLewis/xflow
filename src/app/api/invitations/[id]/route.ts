@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const supabase = await createClient();
@@ -39,10 +40,21 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         data: { read: true },
       });
 
-      return action === "accept" ? "accepted" : "declined";
+      return {
+        action: action === "accept" ? "accepted" : "declined",
+        workspaceId: invitation.workspaceId,
+        role: invitation.role,
+      };
     });
 
-    return NextResponse.json({ ok: true, action: result });
+    await logActivity({
+      workspaceId: result.workspaceId,
+      userId: user.id,
+      action: result.action === "accepted" ? "invitation.accepted" : "invitation.declined",
+      meta: { invitationId: id, role: result.role },
+    });
+
+    return NextResponse.json({ ok: true, action: result.action });
   } catch (e) {
     const code = e instanceof Error ? e.message : "INTERNAL";
     if (code === "NOT_FOUND") return NextResponse.json({ error: "초대를 찾을 수 없어요" }, { status: 404 });

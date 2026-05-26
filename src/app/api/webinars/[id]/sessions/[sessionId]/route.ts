@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 async function authorize(webinarId: string, sessionId: string, userId: string) {
   const session = await prisma.webinarSession.findFirst({
@@ -59,6 +60,13 @@ export async function PATCH(
     },
   });
 
+  await logActivity({
+    workspaceId: session.webinar.workspaceId,
+    userId: user.id,
+    action: "webinar.session_updated",
+    meta: { webinarId: id, sessionId, changes: Object.keys(body) },
+  });
+
   return NextResponse.json({ session: updated });
 }
 
@@ -75,5 +83,12 @@ export async function DELETE(
   if (!session) return NextResponse.json({ error: "접근 권한 없음" }, { status: 403 });
 
   await prisma.webinarSession.delete({ where: { id: session.id } });
+
+  await logActivity({
+    workspaceId: session.webinar.workspaceId,
+    userId: user.id,
+    action: "webinar.session_deleted",
+    meta: { webinarId: id, sessionId, title: session.title },
+  });
   return NextResponse.json({ ok: true });
 }

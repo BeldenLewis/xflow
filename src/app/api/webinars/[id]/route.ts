@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 async function getWebinarWithAuth(id: string, userId: string) {
   const webinar = await prisma.webinar.findUnique({ where: { id } });
@@ -59,6 +60,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     },
   });
 
+  const changed = Object.keys(body).filter((k) =>
+    ["name", "description", "liveStartAt", "liveEndAt", "signupDeadline", "theme", "config"].includes(k),
+  );
+  await logActivity({
+    workspaceId: webinar.workspaceId,
+    userId: user.id,
+    action: "webinar.updated",
+    meta: { webinarId: id, changes: changed },
+  });
+
   return NextResponse.json({ webinar: updated });
 }
 
@@ -75,5 +86,13 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   }
 
   await prisma.webinar.delete({ where: { id } });
+
+  await logActivity({
+    workspaceId: webinar.workspaceId,
+    userId: user.id,
+    action: "webinar.deleted",
+    meta: { webinarId: id, slug: webinar.slug, name: webinar.name },
+  });
+
   return NextResponse.json({ ok: true });
 }

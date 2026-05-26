@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { nextRunFromNow } from "@/lib/cron";
+import { logActivity } from "@/lib/activity";
 
 async function authorize(dashboardId: string) {
   const supabase = await createClient();
@@ -54,5 +55,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       nextRunAt,
     },
   });
+  await logActivity({
+    workspaceId: auth.dashboard.workspaceId,
+    userId: auth.userId,
+    action: "dashboard.report_scheduled",
+    meta: { dashboardId: id, reportId: report.id, name, cron, channel },
+  });
+
   return NextResponse.json({ report });
 }

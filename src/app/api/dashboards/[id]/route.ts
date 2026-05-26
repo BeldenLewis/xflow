@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { randomBytes } from "node:crypto";
+import { logActivity } from "@/lib/activity";
 
 async function authorize(id: string) {
   const supabase = await createClient();
@@ -45,6 +46,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   const updated = await prisma.dashboard.update({ where: { id }, data });
+
+  await logActivity({
+    workspaceId: auth.dashboard.workspaceId,
+    userId: auth.userId,
+    action: "dashboard.updated",
+    meta: { dashboardId: id, changes: Object.keys(data) },
+  });
+
   return NextResponse.json({ dashboard: updated });
 }
 
@@ -59,5 +68,13 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   }
 
   await prisma.dashboard.delete({ where: { id } });
+
+  await logActivity({
+    workspaceId: auth.dashboard.workspaceId,
+    userId: auth.userId,
+    action: "dashboard.deleted",
+    meta: { dashboardId: id, name: auth.dashboard.name },
+  });
+
   return NextResponse.json({ ok: true });
 }

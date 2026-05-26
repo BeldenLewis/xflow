@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 async function authorize(widgetId: string) {
   const supabase = await createClient();
@@ -36,6 +37,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     },
   });
 
+  await logActivity({
+    workspaceId: auth.widget.workspaceId,
+    userId: auth.userId,
+    action: "dashboard.widget_updated",
+    meta: { widgetId: id, dashboardId: auth.widget.dashboardId, changes: Object.keys(body) },
+  });
+
   return NextResponse.json({ widget: updated });
 }
 
@@ -45,5 +53,13 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   if ("error" in auth) return auth.error;
 
   await prisma.dashboardWidget.delete({ where: { id } });
+
+  await logActivity({
+    workspaceId: auth.widget.workspaceId,
+    userId: auth.userId,
+    action: "dashboard.widget_deleted",
+    meta: { widgetId: id, dashboardId: auth.widget.dashboardId, type: auth.widget.type },
+  });
+
   return NextResponse.json({ ok: true });
 }

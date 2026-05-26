@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 // 데이터 자동 보관 정책: N일 지난 레코드 자동 삭제
 // GET 현재 정책, PUT { retainDays: number }
@@ -46,6 +47,13 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
   if (days === 0) {
     await prisma.collectRetentionPolicy.delete({ where: { sourceId: id } }).catch(() => {});
+    await logActivity({
+      workspaceId: source.workspaceId,
+      sourceId: id,
+      userId: user.id,
+      action: "source.retention_updated",
+      meta: { sourceId: id, retainDays: 0 },
+    });
     return NextResponse.json({ policy: null });
   }
 
@@ -54,5 +62,14 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     create: { sourceId: id, retainDays: days },
     update: { retainDays: days, updatedAt: new Date() },
   });
+
+  await logActivity({
+    workspaceId: source.workspaceId,
+    sourceId: id,
+    userId: user.id,
+    action: "source.retention_updated",
+    meta: { sourceId: id, retainDays: days },
+  });
+
   return NextResponse.json({ policy });
 }

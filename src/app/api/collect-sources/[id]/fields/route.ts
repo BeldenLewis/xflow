@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -39,6 +40,14 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const updated = await prisma.fieldMapping.findMany({
     where: { sourceId: id },
     orderBy: { sortOrder: "asc" },
+  });
+
+  await logActivity({
+    workspaceId: source.workspaceId,
+    sourceId: id,
+    userId: user.id,
+    action: "source.fields_updated",
+    meta: { sourceId: id, fieldCount: updated.length },
   });
 
   return NextResponse.json({ fields: updated });

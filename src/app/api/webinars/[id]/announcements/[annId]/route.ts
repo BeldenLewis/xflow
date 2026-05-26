@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 async function authorize(webinarId: string, userId: string) {
   const webinar = await prisma.webinar.findUnique({ where: { id: webinarId } });
@@ -32,6 +33,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     data: { ...(body.isActive !== undefined && { isActive: body.isActive }), ...(body.message !== undefined && { message: body.message }) },
   });
 
+  await logActivity({
+    workspaceId: webinar.workspaceId,
+    userId: user.id,
+    action: "webinar.announcement_updated",
+    meta: { webinarId: id, announcementId: annId, changes: Object.keys(body) },
+  });
+
   return NextResponse.json({ announcement: updated });
 }
 
@@ -51,5 +59,12 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   if (!announcement) return NextResponse.json({ error: "공지를 찾지 못했어요" }, { status: 404 });
 
   await prisma.webinarAnnouncement.delete({ where: { id: announcement.id } });
+
+  await logActivity({
+    workspaceId: webinar.workspaceId,
+    userId: user.id,
+    action: "webinar.announcement_deleted",
+    meta: { webinarId: id, announcementId: annId },
+  });
   return NextResponse.json({ ok: true });
 }

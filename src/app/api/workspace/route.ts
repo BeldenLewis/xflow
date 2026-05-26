@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 // 현재 워크스페이스 + 프로젝트 목록
 export async function GET() {
@@ -72,6 +73,13 @@ export async function POST(request: Request) {
       });
 
       return workspace;
+    });
+
+    await logActivity({
+      workspaceId: result.id,
+      userId: user.id,
+      action: "workspace.created",
+      meta: { name: result.name, slug: result.slug },
     });
 
     return NextResponse.json({ workspace: result });

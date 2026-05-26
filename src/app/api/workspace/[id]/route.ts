@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const supabase = await createClient();
@@ -34,14 +35,23 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const membership = await prisma.workspaceMember.findUnique({
     where: { userId_workspaceId: { userId: user.id, workspaceId: id } },
+    include: { workspace: true },
   });
   if (!membership || !["OWNER", "ADMIN"].includes(membership.role)) {
     return NextResponse.json({ error: "권한 없음" }, { status: 403 });
   }
 
+  const before = membership.workspace.name;
   const workspace = await prisma.workspace.update({
     where: { id },
     data: { name: name.trim() },
+  });
+
+  await logActivity({
+    workspaceId: id,
+    userId: user.id,
+    action: "workspace.renamed",
+    meta: { before, after: workspace.name },
   });
 
   return NextResponse.json({ workspace });
@@ -76,6 +86,13 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   await prisma.workspace.update({
     where: { id },
     data: { deletedAt: new Date() },
+  });
+
+  await logActivity({
+    workspaceId: id,
+    userId: user.id,
+    action: "workspace.deleted",
+    meta: { name: membership.workspace.name },
   });
 
   return NextResponse.json({ ok: true });

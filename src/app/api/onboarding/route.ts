@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 export async function POST(request: Request) {
   try {
@@ -54,6 +55,13 @@ export async function POST(request: Request) {
       });
 
       return { workspace, project };
+    });
+
+    await logActivity({
+      workspaceId: result.workspace.id,
+      userId: authUser.id,
+      action: "workspace.created",
+      meta: { name: result.workspace.name, slug: result.workspace.slug, source: "onboarding" },
     });
 
     return NextResponse.json({ ok: true, workspace: result.workspace, project: result.project });

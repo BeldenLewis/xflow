@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 async function authorize(workspaceId: string, projectId: string) {
   const supabase = await createClient();
@@ -88,6 +89,13 @@ export async function POST(request: Request) {
       width: width ?? "half",
       position,
     },
+  });
+
+  await logActivity({
+    workspaceId,
+    userId: auth.userId,
+    action: "dashboard.widget_created",
+    meta: { dashboardId: dashboard.id, widgetId: widget.id, type, title },
   });
 
   return NextResponse.json({ widget }, { status: 201 });

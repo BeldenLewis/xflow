@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 // 프로젝트 단위 권한 — 워크스페이스 권한 위에 좁은 권한 덮어쓰기.
 // VIEWER / EDITOR / ADMIN
@@ -51,10 +52,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   });
   if (!targetWs) return NextResponse.json({ error: "대상이 워크스페이스 멤버가 아니에요" }, { status: 400 });
 
+  const existing = await prisma.projectMember.findUnique({
+    where: { userId_projectId: { userId, projectId: id } },
+  });
   const member = await prisma.projectMember.upsert({
     where: { userId_projectId: { userId, projectId: id } },
     create: { userId, projectId: id, role: role! },
     update: { role: role! },
+  });
+
+  await logActivity({
+    workspaceId: auth.project.workspaceId,
+    userId: auth.user.id,
+    action: existing ? "project.member_role_changed" : "project.member_added",
+    meta: {
+      projectId: id,
+      targetUserId: userId,
+      role,
+      ...(existing ? { previousRole: existing.role } : {}),
+    },
   });
   return NextResponse.json({ member });
 }
@@ -70,5 +86,12 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   if (!userId) return NextResponse.json({ error: "userId 필요" }, { status: 400 });
 
   await prisma.projectMember.delete({ where: { userId_projectId: { userId, projectId: id } } }).catch(() => {});
+
+  await logActivity({
+    workspaceId: auth.project.workspaceId,
+    userId: auth.user.id,
+    action: "project.member_removed",
+    meta: { projectId: id, targetUserId: userId },
+  });
   return NextResponse.json({ ok: true });
 }

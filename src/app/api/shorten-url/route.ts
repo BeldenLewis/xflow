@@ -3,6 +3,7 @@ import { customAlphabet } from "nanoid";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { rateLimitAsync } from "@/lib/ratelimit";
+import { logActivity } from "@/lib/activity";
 
 const makeCode = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", 7);
 
@@ -80,6 +81,13 @@ export async function POST(request: Request) {
       createdById: user.id,
     });
     const shortUrl = `${shortBaseUrl(request)}/r/${shortLink.code}`;
+
+    await logActivity({
+      workspaceId: membership.workspaceId,
+      userId: user.id,
+      action: "shortLink.created",
+      meta: { shortLinkId: shortLink.id, code: shortLink.code, longUrl },
+    });
 
     return NextResponse.json({ shortUrl });
   } catch (error) {

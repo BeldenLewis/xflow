@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { nextRunFromNow } from "@/lib/cron";
+import { logActivity } from "@/lib/activity";
 
 async function authorize(reportId: string) {
   const supabase = await createClient();
@@ -16,7 +17,7 @@ async function authorize(reportId: string) {
   });
   if (!membership) return { error: NextResponse.json({ error: "접근 권한 없음" }, { status: 403 }) };
 
-  return { report };
+  return { report, userId: user.id };
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string; reportId: string }> }) {
@@ -45,5 +46,13 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   if ("error" in auth) return auth.error;
 
   await prisma.scheduledReport.delete({ where: { id: reportId } });
+
+  await logActivity({
+    workspaceId: auth.report.workspaceId,
+    userId: auth.userId,
+    action: "dashboard.report_deleted",
+    meta: { dashboardId: auth.report.dashboardId, reportId },
+  });
+
   return NextResponse.json({ ok: true });
 }

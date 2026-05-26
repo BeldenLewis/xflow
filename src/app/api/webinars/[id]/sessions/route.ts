@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 async function authorize(webinarId: string, userId: string) {
   const webinar = await prisma.webinar.findUnique({ where: { id: webinarId } });
@@ -65,6 +66,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       startTime,
       endTime,
     },
+  });
+
+  await logActivity({
+    workspaceId: webinar.workspaceId,
+    userId: user.id,
+    action: "webinar.session_created",
+    meta: { webinarId: id, sessionId: session.id, number: session.number, title: session.title },
   });
 
   return NextResponse.json({ session }, { status: 201 });

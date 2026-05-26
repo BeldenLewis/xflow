@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -16,6 +17,13 @@ export async function POST(request: Request) {
 
   const project = await prisma.project.create({
     data: { name, description: description || null, workspaceId: membership.workspaceId },
+  });
+
+  await logActivity({
+    workspaceId: membership.workspaceId,
+    userId: user.id,
+    action: "project.created",
+    meta: { projectId: project.id, name: project.name },
   });
 
   return NextResponse.json({ project });

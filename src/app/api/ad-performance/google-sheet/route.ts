@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 const MAX_GOOGLE_SHEET_CHARS = 12_000_000;
 
@@ -104,6 +106,20 @@ export async function POST(request: Request) {
         { status: 413 }
       );
     }
+
+    const urlHash = createHash("sha1").update(rawUrl).digest("hex").slice(0, 12);
+    await logActivity({
+      workspaceId,
+      userId: user.id,
+      action: "ad.source_synced",
+      meta: {
+        source: "google_sheet",
+        fileName: sheet.fileName,
+        urlHash,
+        csvBytes: csv.length,
+        projectId: body?.projectId ?? null,
+      },
+    });
 
     return NextResponse.json({ csv, fileName: sheet.fileName });
   } catch (error) {

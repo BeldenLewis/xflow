@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 
 interface RegistrationPatch {
   name?: string;
@@ -15,7 +16,11 @@ interface RegistrationPatch {
   memo?: string | null;
 }
 
-async function authorize(webinarId: string) {
+type AuthResult =
+  | { error: NextResponse; workspaceId?: undefined; userId?: undefined }
+  | { error: null; workspaceId: string; userId: string };
+
+async function authorize(webinarId: string): Promise<AuthResult> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: NextResponse.json({ error: "인증 필요" }, { status: 401 }) };
@@ -28,7 +33,7 @@ async function authorize(webinarId: string) {
   });
   if (!membership) return { error: NextResponse.json({ error: "접근 권한 없음" }, { status: 403 }) };
 
-  return { error: null };
+  return { error: null, workspaceId: webinar.workspaceId, userId: user.id };
 }
 
 function clean(value: unknown) {
@@ -108,6 +113,13 @@ export async function DELETE(
   }
 
   await prisma.webinarRegistration.delete({ where: { id: registration.id } });
+
+  await logActivity({
+    workspaceId: auth.workspaceId,
+    userId: auth.userId,
+    action: "webinar.registration_deleted",
+    meta: { webinarId: id, registrationId },
+  });
 
   return NextResponse.json({ ok: true });
 }

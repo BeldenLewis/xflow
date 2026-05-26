@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import * as XLSX from "xlsx";
+import type * as XLSXType from "xlsx";
 import {
   ArrowDown,
   ArrowUp,
@@ -52,12 +52,13 @@ import {
   summarizeRows,
 } from "@/lib/ad-parse";
 
-function workbookToRows(workbook: XLSX.WorkBook) {
+function workbookToRows(XLSX: typeof XLSXType, workbook: XLSXType.WorkBook) {
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false }) as unknown[][];
 }
 
 async function readSheetRows(file: File) {
+  const XLSX = await import("xlsx");
   const buffer = await file.arrayBuffer();
   const isCsv = /\.csv$/i.test(file.name) || file.type.includes("csv");
   if (isCsv) {
@@ -71,15 +72,16 @@ async function readSheetRows(file: File) {
       text = new TextDecoder("utf-8").decode(buffer).replace(/^﻿/, "");
     }
     const workbook = XLSX.read(text, { type: "string", raw: false, cellDates: false });
-    return workbookToRows(workbook);
+    return workbookToRows(XLSX, workbook);
   }
   const workbook = XLSX.read(buffer, { type: "array", raw: false, cellDates: false });
-  return workbookToRows(workbook);
+  return workbookToRows(XLSX, workbook);
 }
 
-function readCsvRows(csvText: string) {
+async function readCsvRows(csvText: string) {
+  const XLSX = await import("xlsx");
   const workbook = XLSX.read(csvText.replace(/^﻿/, ""), { type: "string", raw: false, cellDates: false });
-  return workbookToRows(workbook);
+  return workbookToRows(XLSX, workbook);
 }
 
 type SourceAddMode = "file" | "googleSheet";
@@ -2367,7 +2369,7 @@ function UploadModal({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Google Sheets를 불러오지 못했어요");
 
-      const rows = readCsvRows(String(data.csv ?? ""));
+      const rows = await readCsvRows(String(data.csv ?? ""));
       const nextAnalysis = analyzeSheetRows(rows, sourceChoice);
       const parsed = previewFromAnalysis(nextAnalysis, true);
       setSourceFileName(String(data.fileName ?? "google-sheets.csv"));

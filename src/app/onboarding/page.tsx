@@ -17,8 +17,8 @@ export default function OnboardingPage() {
 
     const formData = new FormData(e.currentTarget);
     const workspaceName = formData.get("workspaceName") as string;
-    const slug = workspaceName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
 
+    // 인증은 서버에서 Supabase 세션으로 검증 — 클라이언트 userId 전송 불필요.
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       router.push("/");
@@ -28,7 +28,7 @@ export default function OnboardingPage() {
     const res = await fetch("/api/onboarding", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceName, slug, userId: user.id, email: user.email, name: user.user_metadata?.name }),
+      body: JSON.stringify({ workspaceName }),
     });
 
     if (!res.ok) {

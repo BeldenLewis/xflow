@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Edit2, Check, Plus, Trash2, Crown, ShieldCheck, User as UserIcon, GripVertical, Tag, Layers } from "lucide-react";
+import { X, Edit2, Check, Plus, Trash2, Crown, ShieldCheck, User as UserIcon, GripVertical, Tag, Layers, AlertTriangle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/contexts/workspace";
 import { Select } from "@/components/ui/select";
@@ -118,6 +119,7 @@ function SortablePresetRow({ p, activeField, editingPresetId, editingLabel, edit
 interface Props { open: boolean; onClose: () => void; }
 
 export function WorkspaceSettingsModal({ open, onClose }: Props) {
+  const router = useRouter();
   const { workspace } = useWorkspace();
 
   const [activeTab, setActiveTab] = useState<ModalTab>("general");
@@ -127,6 +129,11 @@ export function WorkspaceSettingsModal({ open, onClose }: Props) {
   const [isEditingName, setIsEditingName] = useState(false);
   const [editingWsName, setEditingWsName] = useState("");
   const [isSavingName, setIsSavingName] = useState(false);
+
+  // 위험 영역 — 워크스페이스 삭제
+  const [showDangerConfirm, setShowDangerConfirm] = useState(false);
+  const [confirmDeleteName, setConfirmDeleteName] = useState("");
+  const [isDeletingWorkspace, setIsDeletingWorkspace] = useState(false);
 
   const [members, setMembers] = useState<Member[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -379,6 +386,38 @@ export function WorkspaceSettingsModal({ open, onClose }: Props) {
   const isOwner = workspace?.role === "OWNER";
   const canManage = workspace?.role === "OWNER" || workspace?.role === "ADMIN";
 
+  const handleDeleteWorkspace = async () => {
+    if (!workspace?.id) return;
+    if (confirmDeleteName.trim() !== workspace.name) {
+      toast.error("워크스페이스 이름이 일치하지 않아요");
+      return;
+    }
+    setIsDeletingWorkspace(true);
+    try {
+      const res = await fetch(`/api/workspace/${workspace.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmName: confirmDeleteName.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data?.error || "삭제하지 못했어요. 다시 시도해주세요");
+        return;
+      }
+      toast.success("워크스페이스가 삭제됐어요");
+      localStorage.removeItem("currentWorkspaceId");
+      localStorage.removeItem("currentProjectId");
+      onClose();
+      // 다른 워크스페이스가 있으면 / 로 이동해 재진입 시 자동 선택, 없으면 onboarding으로.
+      router.push("/");
+      router.refresh();
+    } catch {
+      toast.error("삭제하지 못했어요. 다시 시도해주세요");
+    } finally {
+      setIsDeletingWorkspace(false);
+    }
+  };
+
   const tabs: { key: ModalTab; label: string; icon: React.ElementType }[] = [
     { key: "general", label: "일반", icon: UserIcon },
     ...(canManage ? [{ key: "utm" as ModalTab, label: "UTM 규칙", icon: Tag }] : []),
@@ -558,6 +597,74 @@ export function WorkspaceSettingsModal({ open, onClose }: Props) {
                           </div>
                         )}
                       </div>
+
+                      {/* 위험 영역 — OWNER만 워크스페이스 삭제 가능 */}
+                      {isOwner && (
+                        <>
+                          <div className="h-px bg-border" />
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2">
+                              <AlertTriangle className="w-4 h-4 text-red-500" />
+                              <p className="text-xs font-medium text-red-500 uppercase tracking-wider">위험 영역</p>
+                            </div>
+                            <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 space-y-3">
+                              <div>
+                                <p className="text-sm font-medium">워크스페이스 삭제</p>
+                                <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                                  삭제하면 워크스페이스 내 모든 프로젝트·사전등록 데이터·웨비나·광고 성과 데이터에 접근할 수 없게 됩니다. 30일간 복구 가능합니다.
+                                </p>
+                              </div>
+                              {!showDangerConfirm ? (
+                                <motion.button
+                                  whileHover={{ y: -1 }}
+                                  whileTap={{ scale: 0.96 }}
+                                  onClick={() => setShowDangerConfirm(true)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-xs font-medium text-red-600 hover:bg-red-500/20 transition-colors"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  워크스페이스 삭제
+                                </motion.button>
+                              ) : (
+                                <div className="space-y-2">
+                                  <label className="block text-xs text-muted-foreground">
+                                    계속하려면 <code className="px-1.5 py-0.5 rounded bg-secondary border border-border font-mono">{workspace?.name}</code> 을(를) 그대로 입력하세요
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={confirmDeleteName}
+                                    onChange={(e) => setConfirmDeleteName(e.target.value)}
+                                    placeholder={workspace?.name ?? ""}
+                                    autoFocus
+                                    className={`w-full px-3 py-2 rounded-xl border bg-background text-sm focus:outline-none transition-colors ${
+                                      confirmDeleteName.trim() === workspace?.name ? "border-red-500/60" : "border-border focus:border-red-400"
+                                    }`}
+                                  />
+                                  <div className="flex gap-2">
+                                    <motion.button
+                                      whileHover={{ y: -1 }}
+                                      whileTap={{ scale: 0.96 }}
+                                      onClick={() => { setShowDangerConfirm(false); setConfirmDeleteName(""); }}
+                                      className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                    >
+                                      취소
+                                    </motion.button>
+                                    <motion.button
+                                      whileHover={{ y: -1 }}
+                                      whileTap={{ scale: 0.96 }}
+                                      onClick={handleDeleteWorkspace}
+                                      disabled={confirmDeleteName.trim() !== workspace?.name || isDeletingWorkspace}
+                                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                    >
+                                      {isDeletingWorkspace ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                                      {isDeletingWorkspace ? "삭제 중..." : "삭제 확정"}
+                                    </motion.button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </motion.div>
                   )}
 

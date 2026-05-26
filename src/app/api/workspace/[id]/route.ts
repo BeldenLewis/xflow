@@ -46,3 +46,37 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   return NextResponse.json({ workspace });
 }
+
+// 워크스페이스 삭제 (soft-delete) — OWNER만 가능. 확인 이름 일치 필수.
+export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
+
+  const { id } = await params;
+  const body = await request.json().catch(() => ({}));
+  const confirmName = typeof body.confirmName === "string" ? body.confirmName.trim() : "";
+  if (!confirmName) return NextResponse.json({ error: "워크스페이스 이름 확인이 필요합니다." }, { status: 400 });
+
+  const membership = await prisma.workspaceMember.findUnique({
+    where: { userId_workspaceId: { userId: user.id, workspaceId: id } },
+    include: { workspace: true },
+  });
+  if (!membership) return NextResponse.json({ error: "권한 없음" }, { status: 403 });
+  if (membership.role !== "OWNER") {
+    return NextResponse.json({ error: "워크스페이스 OWNER만 삭제할 수 있습니다." }, { status: 403 });
+  }
+  if (membership.workspace.deletedAt) {
+    return NextResponse.json({ error: "이미 삭제된 워크스페이스입니다." }, { status: 404 });
+  }
+  if (membership.workspace.name !== confirmName) {
+    return NextResponse.json({ error: "워크스페이스 이름이 일치하지 않습니다." }, { status: 400 });
+  }
+
+  await prisma.workspace.update({
+    where: { id },
+    data: { deletedAt: new Date() },
+  });
+
+  return NextResponse.json({ ok: true });
+}

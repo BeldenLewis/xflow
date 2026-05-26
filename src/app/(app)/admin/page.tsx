@@ -57,6 +57,44 @@ const adminViews: Array<{
   { id: "activity", icon: Activity, label: "활동 로그", desc: "감사 이력" },
 ];
 
+const ACTIVITY_LABELS: Record<string, string> = {
+  "source.created": "사전등록 폼 생성",
+  "source.updated": "사전등록 폼 설정 변경",
+  "source.deleted": "사전등록 폼 삭제",
+  "source.key_regenerated": "API 키 재발급",
+  "record.created": "레코드 생성",
+  "record.updated": "레코드 수정",
+  "record.deleted": "레코드 삭제",
+  "records.bulk_deleted": "레코드 대량 삭제",
+  "records.imported": "레코드 가져오기",
+  "records.cleaned": "데이터 정리",
+  "records.normalized": "데이터 정규화",
+  "records.exported": "레코드 내보내기",
+  "collect.records.exported": "사전등록 내보내기",
+  "workspace.member.invited": "팀원 초대",
+  "workspace.member.role_changed": "팀원 권한 변경",
+  "workspace.member.removed": "팀원 제거",
+  "apiToken.created": "API 토큰 발급",
+  "apiToken.revoked": "API 토큰 회수",
+  "dashboardShareToken.rotated": "대시보드 공유 토큰 회전",
+  "webinar.registrations.exported": "웨비나 등록자 내보내기",
+  "scheduledReport.delivered": "리포트 발송 성공",
+  "scheduledReport.delivery_failed": "리포트 발송 실패",
+  "admin.workspace_renamed": "관리자 — 워크스페이스 이름 변경",
+  "admin.workspace_archived": "관리자 — 워크스페이스 보관",
+  "admin.workspace_restored": "관리자 — 워크스페이스 복구",
+  "admin.project_updated": "관리자 — 프로젝트 변경",
+  "admin.project_archived": "관리자 — 프로젝트 보관",
+  "admin.project_restored": "관리자 — 프로젝트 복구",
+  "admin.source_activated": "관리자 — 소스 활성화",
+  "admin.source_paused": "관리자 — 소스 일시중지",
+  "admin.user_deleted": "관리자 — 사용자 삭제",
+};
+
+function adminActivityLabel(action: string): string {
+  return ACTIVITY_LABELS[action] ?? action;
+}
+
 function firstParam(value?: string | string[]) {
   return Array.isArray(value) ? value[0] ?? "" : value ?? "";
 }
@@ -361,6 +399,18 @@ export default async function SuperAdminPage({ searchParams }: { searchParams?: 
             },
           },
         },
+        activityLogs: {
+          orderBy: { createdAt: "desc" },
+          take: 15,
+          select: {
+            id: true,
+            action: true,
+            createdAt: true,
+            meta: true,
+            workspace: { select: { name: true, slug: true } },
+            source: { select: { name: true } },
+          },
+        },
         _count: {
           select: {
             memberships: true,
@@ -644,38 +694,73 @@ export default async function SuperAdminPage({ searchParams }: { searchParams?: 
 
                         <ManagementDetails>
                           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
-                            <div>
-                              <h4 className="text-xs font-semibold text-muted-foreground">소속과 생성 맥락</h4>
-                              <div className="mt-2 divide-y divide-border rounded-lg border border-border bg-background">
-                                {adminUser.memberships.length === 0 ? (
-                                  <p className="px-3 py-3 text-xs text-muted-foreground">연결된 워크스페이스가 없습니다.</p>
-                                ) : (
-                                  adminUser.memberships.map((membership) => (
-                                    <div key={`${adminUser.id}-${membership.workspace.id}`} className="grid gap-2 px-3 py-3 sm:grid-cols-[1fr_auto]">
-                                      <div className="min-w-0">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                          <p className="truncate text-xs font-medium">{membership.workspace.name}</p>
-                                          <StatusPill tone={membership.workspace.deletedAt ? "warn" : "neutral"}>
-                                            {membership.workspace.deletedAt ? "보관됨" : membership.role}
-                                          </StatusPill>
+                            <div className="space-y-4">
+                              <div>
+                                <h4 className="text-xs font-semibold text-muted-foreground">소속과 생성 맥락</h4>
+                                <div className="mt-2 divide-y divide-border rounded-lg border border-border bg-background">
+                                  {adminUser.memberships.length === 0 ? (
+                                    <p className="px-3 py-3 text-xs text-muted-foreground">연결된 워크스페이스가 없습니다.</p>
+                                  ) : (
+                                    adminUser.memberships.map((membership) => (
+                                      <div key={`${adminUser.id}-${membership.workspace.id}`} className="grid gap-2 px-3 py-3 sm:grid-cols-[1fr_auto]">
+                                        <div className="min-w-0">
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <p className="truncate text-xs font-medium">{membership.workspace.name}</p>
+                                            <StatusPill tone={membership.workspace.deletedAt ? "warn" : "neutral"}>
+                                              {membership.workspace.deletedAt ? "보관됨" : membership.role}
+                                            </StatusPill>
+                                          </div>
+                                          <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{membership.workspace.slug}</p>
                                         </div>
-                                        <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{membership.workspace.slug}</p>
+                                        <div className="text-[11px] text-muted-foreground sm:text-right">
+                                          <p>가입 {formatKstDateTime(membership.joinedAt).slice(0, 10)}</p>
+                                          <p>생성 {formatKstDateTime(membership.workspace.createdAt).slice(0, 10)}</p>
+                                          <p>멤버 {membership.workspace._count.members} · 프로젝트 {membership.workspace._count.projects}</p>
+                                        </div>
                                       </div>
-                                      <div className="text-[11px] text-muted-foreground sm:text-right">
-                                        <p>가입 {formatKstDateTime(membership.joinedAt).slice(0, 10)}</p>
-                                        <p>생성 {formatKstDateTime(membership.workspace.createdAt).slice(0, 10)}</p>
-                                        <p>멤버 {membership.workspace._count.members} · 프로젝트 {membership.workspace._count.projects}</p>
+                                    ))
+                                  )}
+                                </div>
+                              </div>
+
+                              <div>
+                                <h4 className="text-xs font-semibold text-muted-foreground">
+                                  최근 활동 히스토리
+                                  <span className="ml-2 font-normal text-muted-foreground/70">
+                                    최근 {adminUser.activityLogs.length}건 (총 {adminUser._count.activityLogs.toLocaleString()}건)
+                                  </span>
+                                </h4>
+                                <div className="mt-2 divide-y divide-border rounded-lg border border-border bg-background max-h-72 overflow-y-auto">
+                                  {adminUser.activityLogs.length === 0 ? (
+                                    <p className="px-3 py-3 text-xs text-muted-foreground">활동 기록이 없습니다.</p>
+                                  ) : (
+                                    adminUser.activityLogs.map((log) => (
+                                      <div key={log.id} className="grid gap-1 px-3 py-2 sm:grid-cols-[1fr_auto] sm:items-center">
+                                        <div className="min-w-0">
+                                          <div className="flex flex-wrap items-center gap-1.5">
+                                            <span className="font-mono text-[11px] text-foreground">{adminActivityLabel(log.action)}</span>
+                                            {log.source?.name && (
+                                              <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">{log.source.name}</span>
+                                            )}
+                                          </div>
+                                          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                                            {log.workspace?.name ?? "—"} · <span className="font-mono">{log.action}</span>
+                                          </p>
+                                        </div>
+                                        <span className="text-[11px] text-muted-foreground sm:text-right">
+                                          {formatKstDateTime(log.createdAt)}
+                                        </span>
                                       </div>
-                                    </div>
-                                  ))
-                                )}
+                                    ))
+                                  )}
+                                </div>
                               </div>
                             </div>
 
                             <div>
                               <h4 className="text-xs font-semibold text-muted-foreground">삭제 전 확인</h4>
                               <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                                앱 데이터 기준 삭제입니다. Supabase Auth 계정 완전 삭제는 서비스 롤 연동 후 별도 처리해야 합니다.
+                                앱 데이터 + Supabase Auth 계정이 함께 삭제됩니다. 되돌릴 수 없습니다.
                               </p>
                               <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                                 <span>UTM {adminUser._count.utmLinks}</span>

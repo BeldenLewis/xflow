@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { isSuperAdminEmail } from "@/lib/super-admin";
 
 async function requireSuperAdminUser() {
@@ -241,5 +242,20 @@ export async function deleteUserAction(formData: FormData) {
     prisma.user.delete({ where: { id: targetUserId } }),
   ]);
 
-  finishAdminAction("사용자를 삭제했습니다. Supabase Auth 계정 삭제는 서비스 롤 연동 후 별도로 처리해야 합니다.");
+  // Supabase Auth 계정 삭제 — service role 사용. 실패해도 DB 삭제는 이미 완료된 상태.
+  let authMessage = "";
+  try {
+    const supabaseAdmin = createAdminClient();
+    const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(targetUserId);
+    if (authError) {
+      authMessage = ` (단, Supabase Auth 계정은 수동 삭제 필요: ${authError.message})`;
+      console.error("[admin] Supabase Auth deletion failed:", authError.message);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    authMessage = ` (단, Supabase Auth 계정은 수동 삭제 필요: ${message})`;
+    console.error("[admin] Supabase admin client error:", message);
+  }
+
+  finishAdminAction(`사용자를 삭제했습니다.${authMessage}`);
 }

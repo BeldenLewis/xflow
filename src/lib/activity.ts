@@ -22,7 +22,10 @@ export type ActivityAction =
   | "dashboardShareToken.rotated"
   | "webinar.registrations.exported"
   | "scheduledReport.delivered"
-  | "scheduledReport.delivery_failed";
+  | "scheduledReport.delivery_failed"
+  | "utm.created"
+  | "utm.updated"
+  | "utm.deleted";
 
 export async function logActivity(args: {
   workspaceId: string;

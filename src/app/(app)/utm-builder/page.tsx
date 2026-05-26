@@ -574,6 +574,8 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
   const isEdit = !!editingLink;
   const [mode, setMode] = useState<BuilderMode>("basic");
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  // 기본 모드에서 여러 URL을 한 번에 만들 때 사용. form.url(현재 입력 중) + extraUrls(확정된 추가 URL들).
+  const [extraUrls, setExtraUrls] = useState<string[]>([]);
   const [advUrls, setAdvUrls] = useState<string[]>([]);
   const [advSources, setAdvSources] = useState<string[]>([]);
   const [advMediums, setAdvMediums] = useState<string[]>([]);
@@ -673,9 +675,11 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
   }, [persistDraft, isEdit, duplicateFrom, open]);
 
   const generatedUrl = useMemo(() => {
-    if (!form.url || !form.source || !form.medium || !form.campaign) return "";
+    // form.url이 비어있어도 칩으로 추가한 URL이 있으면 첫 번째 칩을 미리보기로 사용.
+    const baseUrl = form.url.trim() || extraUrls[0] || "";
+    if (!baseUrl || !form.source || !form.medium || !form.campaign) return "";
     try {
-      const base = form.url.startsWith("http") ? form.url : `https://${form.url}`;
+      const base = baseUrl.startsWith("http") ? baseUrl : `https://${baseUrl}`;
       const u = new URL(base);
       u.searchParams.set("utm_source", form.source);
       u.searchParams.set("utm_medium", form.medium);
@@ -684,7 +688,7 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
       if (form.content) u.searchParams.set("utm_content", form.content);
       return u.toString();
     } catch { return ""; }
-  }, [form]);
+  }, [form, extraUrls]);
 
   // URL 유효성 검사
   const checkUrl = (url: string) => {
@@ -740,6 +744,7 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
 
   const reset = () => {
     setForm(EMPTY_FORM);
+    setExtraUrls([]);
     setShortUrl(""); setShowQR(false); setAppliedTemplate(null);
     setCampaignEntryMode("select");
     setUrlStatus("idle"); setShowDraftBanner(false);
@@ -811,6 +816,20 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
     finally { setIsShortening(false); }
   };
 
+  // 같은 source/medium/campaign 조합에 URL만 다른 경우 fullUrl을 만들어주는 헬퍼.
+  const buildFullUrl = (rawUrl: string) => {
+    try {
+      const base = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
+      const u = new URL(base);
+      u.searchParams.set("utm_source", form.source);
+      u.searchParams.set("utm_medium", form.medium);
+      u.searchParams.set("utm_campaign", form.campaign);
+      if (form.term)    u.searchParams.set("utm_term", form.term);
+      if (form.content) u.searchParams.set("utm_content", form.content);
+      return u.toString();
+    } catch { return ""; }
+  };
+
   const handleSave = async () => {
     if (!generatedUrl) return;
     setIsSaving(true);
@@ -827,17 +846,39 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
         });
         toast.success("수정됐어요", { id });
       } else {
-        await fetch("/api/utm", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: form.name || null, url: form.url,
-            utmSource: form.source, utmMedium: form.medium, utmCampaign: form.campaign,
-            utmTerm: form.term || null, utmContent: form.content || null,
-            fullUrl: generatedUrl, shortUrl: shortUrl || null,
-            projectId: currentProject?.id || null,
-          }),
-        });
-        toast.success("UTM이 저장됐어요", { id });
+        // 기본 모드 다중 URL: form.url(현재 입력) + extraUrls(확정 칩들). 중복 제거.
+        const urls = Array.from(new Set([form.url.trim(), ...extraUrls].filter(Boolean)));
+        if (urls.length <= 1) {
+          await fetch("/api/utm", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: form.name || null, url: form.url,
+              utmSource: form.source, utmMedium: form.medium, utmCampaign: form.campaign,
+              utmTerm: form.term || null, utmContent: form.content || null,
+              fullUrl: generatedUrl, shortUrl: shortUrl || null,
+              projectId: currentProject?.id || null,
+            }),
+          });
+          toast.success("UTM이 저장됐어요", { id });
+        } else {
+          const results = await Promise.allSettled(
+            urls.map((rawUrl) => fetch("/api/utm", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                name: form.name || null, url: rawUrl,
+                utmSource: form.source, utmMedium: form.medium, utmCampaign: form.campaign,
+                utmTerm: form.term || null, utmContent: form.content || null,
+                fullUrl: buildFullUrl(rawUrl), shortUrl: null,
+                projectId: currentProject?.id || null,
+              }),
+            }))
+          );
+          const ok = results.filter((r) => r.status === "fulfilled").length;
+          const fail = results.length - ok;
+          if (fail === 0) toast.success(`UTM ${ok}개 저장됐어요`, { id });
+          else if (ok === 0) throw new Error("모두 실패");
+          else toast.success(`UTM ${ok}개 저장됐어요 (${fail}개 실패)`, { id });
+        }
       }
       clearDraftPayload();
       reset();
@@ -1041,19 +1082,58 @@ function CreateDrawer({ open, onClose, presets, templates, onSaved, editingLink,
                         onChange={(e) => set("name")(e.target.value)} className={inputCls} />
                     </Field>
 
-                    <Field label="이동할 링크 주소" required>
+                    <Field label="이동할 링크 주소" required hint={extraUrls.length > 0 ? "Enter로 여러 URL을 한 번에 만들 수 있어요" : "Enter로 URL을 추가할 수 있어요"}>
                       <div className="relative">
                         <input type="text" placeholder="https://example.com/event" value={form.url}
                           onChange={(e) => { set("url")(e.target.value); setUrlStatus("idle"); }}
                           onBlur={(e) => checkUrl(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              const trimmed = form.url.trim();
+                              if (!trimmed || extraUrls.includes(trimmed)) return;
+                              setExtraUrls((prev) => [...prev, trimmed]);
+                              set("url")("");
+                              setUrlStatus("idle");
+                            }
+                          }}
                           className={inputCls + (urlStatus === "ok" ? " border-green-400 focus:border-green-400 focus:ring-green-400/20" : urlStatus === "warn" ? " border-amber-400 focus:border-amber-400 focus:ring-amber-400/20" : "")} />
                         {urlStatus === "checking" && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2" />}
                         {urlStatus === "ok"       && <CheckCircle2 className="w-3.5 h-3.5 text-green-500 absolute right-3 top-1/2 -translate-y-1/2" />}
                         {urlStatus === "warn"     && <AlertCircle  className="w-3.5 h-3.5 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2" />}
                       </div>
+                      <AnimatePresence>
+                        {extraUrls.length > 0 && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="flex flex-wrap gap-1.5 mt-2"
+                          >
+                            {extraUrls.map((u) => (
+                              <span key={u} className="inline-flex items-center gap-1 max-w-full px-2 py-1 rounded-lg bg-violet-500/10 text-violet-600 text-xs font-mono">
+                                <span className="truncate max-w-[280px]">{u}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setExtraUrls((prev) => prev.filter((x) => x !== u))}
+                                  className="hover:text-violet-800 transition-colors leading-none shrink-0"
+                                  aria-label="URL 제거"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </span>
+                            ))}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                       {urlStatus === "ok"   && <p className="text-xs text-green-600 mt-1">접근 가능한 URL이에요</p>}
                       {urlStatus === "warn" && <p className="text-xs text-amber-600 mt-1">URL에 접근할 수 없어요. 주소를 다시 확인해주세요</p>}
-                      {urlStatus === "idle" && <p className="text-xs text-muted-foreground mt-1">광고를 클릭했을 때 열릴 페이지 주소예요</p>}
+                      {urlStatus === "idle" && extraUrls.length === 0 && <p className="text-xs text-muted-foreground mt-1">광고를 클릭했을 때 열릴 페이지 주소예요 (Enter로 여러 개 추가 가능)</p>}
+                      {extraUrls.length > 0 && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          총 {extraUrls.length + (form.url.trim() ? 1 : 0)}개 URL이 같은 UTM으로 만들어져요
+                        </p>
+                      )}
                     </Field>
 
                     {/* 노출 위치 */}

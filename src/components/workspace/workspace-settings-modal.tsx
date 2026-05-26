@@ -120,7 +120,7 @@ interface Props { open: boolean; onClose: () => void; }
 
 export function WorkspaceSettingsModal({ open, onClose }: Props) {
   const router = useRouter();
-  const { workspace } = useWorkspace();
+  const { workspace, refreshWorkspaces } = useWorkspace();
 
   const [activeTab, setActiveTab] = useState<ModalTab>("general");
 
@@ -215,6 +215,8 @@ export function WorkspaceSettingsModal({ open, onClose }: Props) {
       if (!res.ok) { toast.error("워크스페이스 이름을 저장하지 못했어요. 다시 시도해주세요"); return; }
       setWsName(editingWsName.trim());
       setIsEditingName(false);
+      // 사이드바·전역 컨텍스트에도 즉시 반영.
+      await refreshWorkspaces();
       toast.success("워크스페이스 이름이 변경됐어요");
     } finally { setIsSavingName(false); }
   };
@@ -408,9 +410,13 @@ export function WorkspaceSettingsModal({ open, onClose }: Props) {
       localStorage.removeItem("currentWorkspaceId");
       localStorage.removeItem("currentProjectId");
       onClose();
-      // 다른 워크스페이스가 있으면 / 로 이동해 재진입 시 자동 선택, 없으면 onboarding으로.
-      router.push("/");
-      router.refresh();
+      // 컨텍스트 실시간 반영. 다른 워크스페이스 없으면 onboarding으로 이동.
+      const list = await refreshWorkspaces();
+      if (list.length === 0) {
+        router.push("/onboarding");
+      } else {
+        router.push("/dashboard");
+      }
     } catch {
       toast.error("삭제하지 못했어요. 다시 시도해주세요");
     } finally {

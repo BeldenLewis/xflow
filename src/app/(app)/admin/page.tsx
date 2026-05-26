@@ -26,6 +26,7 @@ import { formatKstDateTime } from "@/lib/datetime";
 import { isSuperAdminEmail, SUPER_ADMIN_EMAIL } from "@/lib/super-admin";
 import {
   deleteUserAction,
+  deleteWorkspacePermanentlyAction,
   renameProjectAction,
   renameWorkspaceAction,
   setCollectSourceActiveAction,
@@ -138,6 +139,7 @@ const ACTIVITY_LABELS: Record<string, string> = {
   "admin.source_activated": "관리자 — 소스 활성화",
   "admin.source_paused": "관리자 — 소스 일시중지",
   "admin.user_deleted": "관리자 — 사용자 삭제",
+  "admin.workspace_permanently_deleted": "관리자 — 워크스페이스 영구 삭제",
 };
 
 function adminActivityLabel(action: string): string {
@@ -877,15 +879,31 @@ export default async function SuperAdminPage({ searchParams }: { searchParams?: 
                             <input name="reason" placeholder="변경 사유" aria-label="워크스페이스 이름 변경 사유" className="h-9 rounded-lg border border-border bg-background px-3 text-xs outline-none focus:border-violet-400" />
                             <SubmitButton>이름 변경</SubmitButton>
                           </form>
-                          <form action={setWorkspaceArchivedAction} className="grid grid-cols-[1fr_auto] gap-2">
-                            <input type="hidden" name="workspaceId" value={workspace.id} />
-                            <input type="hidden" name="mode" value={workspace.deletedAt ? "restore" : "archive"} />
-                            <input name="reason" required placeholder={workspace.deletedAt ? "복구 사유" : "보관 사유"} aria-label="워크스페이스 보관 또는 복구 사유" className="h-9 rounded-lg border border-border bg-background px-3 text-xs outline-none focus:border-violet-400" />
-                            <SubmitButton tone={workspace.deletedAt ? "good" : "danger"}>
-                              {workspace.deletedAt ? <ArchiveRestore className="mr-1 size-3.5" /> : <Archive className="mr-1 size-3.5" />}
-                              {workspace.deletedAt ? "복구" : "보관"}
-                            </SubmitButton>
-                          </form>
+                          <div className="space-y-2">
+                            <form action={setWorkspaceArchivedAction} className="grid grid-cols-[1fr_auto] gap-2">
+                              <input type="hidden" name="workspaceId" value={workspace.id} />
+                              <input type="hidden" name="mode" value={workspace.deletedAt ? "restore" : "archive"} />
+                              <input name="reason" required placeholder={workspace.deletedAt ? "복구 사유" : "보관 사유"} aria-label="워크스페이스 보관 또는 복구 사유" className="h-9 rounded-lg border border-border bg-background px-3 text-xs outline-none focus:border-violet-400" />
+                              <SubmitButton tone={workspace.deletedAt ? "good" : "danger"}>
+                                {workspace.deletedAt ? <ArchiveRestore className="mr-1 size-3.5" /> : <Archive className="mr-1 size-3.5" />}
+                                {workspace.deletedAt ? "복구" : "보관"}
+                              </SubmitButton>
+                            </form>
+                            <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3 space-y-2">
+                              <p className="text-[11px] leading-5 text-red-600 dark:text-red-400">
+                                영구 삭제 — 모든 프로젝트·레코드·웨비나·UTM 데이터가 함께 사라집니다. 복구 불가.
+                              </p>
+                              <form action={deleteWorkspacePermanentlyAction} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                                <input type="hidden" name="workspaceId" value={workspace.id} />
+                                <input name="confirmName" required placeholder={`이름 입력: ${workspace.name}`} aria-label="확인용 워크스페이스 이름" className="h-9 rounded-lg border border-red-500/30 bg-background px-3 text-xs outline-none focus:border-red-500" />
+                                <input name="reason" required placeholder="영구 삭제 사유" aria-label="영구 삭제 사유" className="h-9 rounded-lg border border-red-500/30 bg-background px-3 text-xs outline-none focus:border-red-500" />
+                                <SubmitButton tone="danger">
+                                  <Trash2 className="mr-1 size-3.5" />
+                                  영구 삭제
+                                </SubmitButton>
+                              </form>
+                            </div>
+                          </div>
                         </div>
                       </ManagementDetails>
                     </article>

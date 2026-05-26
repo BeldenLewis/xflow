@@ -178,6 +178,49 @@ export async function setCollectSourceActiveAction(formData: FormData) {
   finishAdminAction(isActive ? "수집 소스를 활성화했습니다." : "수집 소스를 일시중지했습니다.");
 }
 
+export async function deleteWorkspacePermanentlyAction(formData: FormData) {
+  const admin = await requireSuperAdminUser();
+  const workspaceId = getRequiredString(formData, "workspaceId", "워크스페이스 ID");
+  const confirmName = getRequiredString(formData, "confirmName", "확인용 워크스페이스 이름", 80);
+  const reason = getRequiredString(formData, "reason", "삭제 사유", 240);
+
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { id: true, name: true, slug: true },
+  });
+  if (!workspace) throw new Error("워크스페이스를 찾을 수 없습니다.");
+  if (workspace.name !== confirmName) {
+    throw new Error("워크스페이스 이름이 일치하지 않습니다.");
+  }
+
+  // 영구 삭제 — 모든 관련 데이터 cascade. ActivityLog는 다른 워크스페이스에 기록.
+  // 단, 활동 로그를 위해 정보를 미리 저장.
+  const snapshot = {
+    workspaceId: workspace.id,
+    workspaceName: workspace.name,
+    workspaceSlug: workspace.slug,
+    reason,
+    deletedBy: admin.email,
+  };
+
+  await prisma.workspace.delete({ where: { id: workspaceId } });
+
+  // 관리자 본인의 다른 워크스페이스에 기록 (cascade로 사라지지 않게)
+  const adminMembership = await prisma.workspaceMember.findFirst({
+    where: { userId: admin.id, workspace: { deletedAt: null } },
+  });
+  if (adminMembership) {
+    await createAdminLog({
+      workspaceId: adminMembership.workspaceId,
+      userId: admin.id,
+      action: "admin.workspace_permanently_deleted",
+      meta: snapshot,
+    });
+  }
+
+  finishAdminAction(`워크스페이스 '${workspace.name}'을(를) 영구 삭제했습니다.`);
+}
+
 export async function deleteUserAction(formData: FormData) {
   const admin = await requireSuperAdminUser();
   const targetUserId = getRequiredString(formData, "userId", "사용자 ID");

@@ -23,6 +23,7 @@ interface WorkspaceContextType {
   setCurrentProject: (project: Project) => void;
   switchWorkspace: (workspace: Workspace) => Promise<void>;
   refreshProjects: () => Promise<void>;
+  refreshWorkspaces: () => Promise<Workspace[]>;
   isLoading: boolean;
 }
 
@@ -58,13 +59,47 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     applyProjects(data.projects ?? []);
   }, []);
 
+  // 워크스페이스 목록만 다시 가져오기 — 워크스페이스 생성/삭제 후 즉시 반영용.
+  const refreshWorkspaces = useCallback(async () => {
+    const res = await fetch("/api/workspace");
+    if (!res.ok) return [];
+    const data = await res.json();
+    const list: Workspace[] = data.workspaces ?? [];
+    setWorkspaces(list);
+    // 현재 선택된 워크스페이스가 사라졌으면 첫 번째로 전환.
+    const currentWsId = localStorage.getItem("currentWorkspaceId");
+    const stillExists = list.find((w) => w.id === currentWsId);
+    if (!stillExists && list.length > 0) {
+      localStorage.setItem("currentWorkspaceId", list[0].id);
+      localStorage.removeItem("currentProjectId");
+      setWorkspace(list[0]);
+      const wsRes = await fetch(`/api/workspace/${list[0].id}`);
+      if (wsRes.ok) {
+        const wsData = await wsRes.json();
+        applyProjects(wsData.projects ?? []);
+      }
+    } else if (list.length === 0) {
+      setWorkspace(null);
+      setProjects([]);
+      setCurrentProjectState(null);
+    }
+    return list;
+  }, []);
+
   const switchWorkspace = useCallback(async (ws: Workspace) => {
     localStorage.setItem("currentWorkspaceId", ws.id);
     localStorage.removeItem("currentProjectId");
     setWorkspace(ws);
-    const res = await fetch(`/api/workspace/${ws.id}`);
-    if (!res.ok) return;
-    const data = await res.json();
+    const [wsListRes, wsRes] = await Promise.all([
+      fetch("/api/workspace"),
+      fetch(`/api/workspace/${ws.id}`),
+    ]);
+    if (wsListRes.ok) {
+      const listData = await wsListRes.json();
+      setWorkspaces(listData.workspaces ?? []);
+    }
+    if (!wsRes.ok) return;
+    const data = await wsRes.json();
     applyProjects(data.projects ?? []);
   }, []);
 
@@ -96,7 +131,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   return (
     <WorkspaceContext.Provider value={{
       workspace, workspaces, projects, currentProject,
-      setCurrentProject, switchWorkspace, refreshProjects, isLoading,
+      setCurrentProject, switchWorkspace, refreshProjects, refreshWorkspaces, isLoading,
     }}>
       {children}
     </WorkspaceContext.Provider>

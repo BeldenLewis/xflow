@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Bell, Check, X, UserPlus, ShieldCheck, UserMinus, Database, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { useWorkspace } from "@/contexts/workspace";
 
 interface NotificationData {
   invitationId?: string;
@@ -47,6 +48,7 @@ function timeAgo(dateStr: string) {
 
 function NotificationItem({ n, onAction }: { n: Notification; onAction: () => void }) {
   const [isActing, setIsActing] = useState(false);
+  const { refreshWorkspaces } = useWorkspace();
 
   const handleInvite = async (action: "accept" | "decline") => {
     if (!n.data.invitationId) return;
@@ -60,6 +62,10 @@ function NotificationItem({ n, onAction }: { n: Notification; onAction: () => vo
       const data = await res.json();
       if (!res.ok) { toast.error(data.error ?? "처리하지 못했어요"); return; }
       toast.success(action === "accept" ? `'${n.data.workspaceName}' 워크스페이스에 참여했어요` : "초대를 거절했어요");
+      // 수락 시 사이드바·전역 워크스페이스 목록 즉시 갱신.
+      if (action === "accept") {
+        await refreshWorkspaces();
+      }
       onAction();
     } finally { setIsActing(false); }
   };

@@ -374,6 +374,18 @@ export default function AnalyticsPage() {
     };
     unattributed: { registrations: number };
     matchedCampaignCount: number;
+    channelRows?: Array<{
+      sourceType: string;
+      label: string;
+      cost: number;
+      impressions: number;
+      clicks: number;
+      adConversions: number;
+      registrations: number;
+      cac: number | null;
+      ctr: number;
+      cvr: number | null;
+    }>;
   };
   const [cacData, setCacData] = useState<CacResponse | null>(null);
   const [cacLoading, setCacLoading] = useState(false);
@@ -1535,6 +1547,69 @@ export default function AnalyticsPage() {
                       </tr>
                     </tfoot>
                   </table>
+                </div>
+              )}
+
+              {/* 매체 단위 폴백 — 캠페인명이 안 맞아도 매체별 CAC 비교는 가능 */}
+              {cacData && cacData.channelRows && cacData.channelRows.length > 0 && (
+                <div className="mt-5 pt-5 border-t border-border">
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-xs font-semibold">매체 단위 집계</h3>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                        캠페인명이 UTM과 다를 때 폴백 — 같은 매체(GOOGLE/META/LINKEDIN)의 모든 사전등록을 합산해 CAC 산출
+                      </p>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                          <th className="py-2 pr-3 font-medium">매체</th>
+                          <th className="py-2 pr-3 text-right font-medium">광고비</th>
+                          <th className="py-2 pr-3 text-right font-medium">노출</th>
+                          <th className="py-2 pr-3 text-right font-medium">클릭</th>
+                          <th className="py-2 pr-3 text-right font-medium">등록</th>
+                          <th className="py-2 pr-3 text-right font-medium">CTR</th>
+                          <th className="py-2 pr-3 text-right font-medium">CVR</th>
+                          <th className="py-2 pr-0 text-right font-medium">CAC</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cacData.channelRows.map((row) => (
+                          <motion.tr
+                            key={row.sourceType}
+                            whileHover={{ backgroundColor: "rgba(139, 92, 246, 0.04)" }}
+                            transition={spring}
+                            className="border-b border-border/60"
+                          >
+                            <td className="py-2 pr-3 font-medium">{row.label}</td>
+                            <td className="py-2 pr-3 text-right tabular-nums">{formatKRW(row.cost)}</td>
+                            <td className="py-2 pr-3 text-right tabular-nums">{formatNumber(row.impressions)}</td>
+                            <td className="py-2 pr-3 text-right tabular-nums">{formatNumber(row.clicks)}</td>
+                            <td className="py-2 pr-3 text-right tabular-nums">
+                              {row.registrations > 0 ? (
+                                <span className="font-medium">{formatNumber(row.registrations)}</span>
+                              ) : (
+                                <span className="text-muted-foreground">0</span>
+                              )}
+                            </td>
+                            <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">{formatPct(row.ctr)}</td>
+                            <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
+                              {row.cvr == null ? "—" : formatPct(row.cvr)}
+                            </td>
+                            <td className="py-2 pr-0 text-right tabular-nums">
+                              {row.cac == null ? (
+                                <span className="text-muted-foreground">—</span>
+                              ) : (
+                                <span className="font-medium">{formatKRW(row.cac)}</span>
+                              )}
+                            </td>
+                          </motion.tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
             </motion.section>

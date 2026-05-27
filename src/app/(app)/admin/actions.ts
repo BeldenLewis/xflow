@@ -5,7 +5,8 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isSuperAdminEmail, checkSuperAdminAccess, isRootSuperAdmin } from "@/lib/super-admin";
+import { isSuperAdminEmail, isRootSuperAdmin } from "@/lib/super-admin";
+import { checkSuperAdminAccess } from "@/lib/super-admin-server";
 
 async function requireSuperAdminUser() {
   const supabase = await createClient();

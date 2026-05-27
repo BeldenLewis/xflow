@@ -24,7 +24,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { prisma } from "@/lib/prisma";
 import { formatKstDateTime } from "@/lib/datetime";
-import { isSuperAdminEmail, checkSuperAdminAccess, isRootSuperAdmin, SUPER_ADMIN_EMAIL } from "@/lib/super-admin";
+import { isSuperAdminEmail, isRootSuperAdmin, SUPER_ADMIN_EMAIL } from "@/lib/super-admin";
+import { checkSuperAdminAccess } from "@/lib/super-admin-server";
 import {
   deleteUserAction,
   deleteWorkspacePermanentlyAction,

@@ -1,10 +1,10 @@
 "use client";
 
-import { Activity, CalendarDays, Clock3, Mail, TrendingUp, UserCheck, Users } from "lucide-react";
+import { Activity, BarChart3, CalendarDays, Clock3, Mail, TrendingUp, UserCheck, Users } from "lucide-react";
 import type { ElementType } from "react";
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Area, AreaChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatKstDateTime } from "@/lib/datetime";
 
 const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
@@ -296,6 +296,102 @@ function CumulativeLineChart({ points }: { points: RealtimeReportData["cumulativ
             activeDot={{ r: 4 }}
           />
         </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function DailyBarChart({ points }: { points: RealtimeReportData["cumulativeTrend"] }) {
+  if (!points.length) return null;
+
+  // 7일 이동평균 대비 급등(+50%) 감지 — 최소 5건 이상일 때만 (작은 수치 노이즈 방지)
+  const SPIKE_THRESHOLD = 1.5;
+  const SPIKE_MIN_COUNT = 5;
+  const enriched = points.map((p, i) => {
+    const baselineStart = Math.max(0, i - 7);
+    const baselinePoints = points.slice(baselineStart, i);
+    const baselineAvg = baselinePoints.length > 0
+      ? baselinePoints.reduce((s, b) => s + b.count, 0) / baselinePoints.length
+      : 0;
+    const isSpike =
+      p.count >= SPIKE_MIN_COUNT &&
+      baselineAvg > 0 &&
+      p.count >= baselineAvg * SPIKE_THRESHOLD;
+    return { ...p, baselineAvg, isSpike };
+  });
+
+  const max = Math.max(...points.map((p) => p.count));
+  const total = points.reduce((s, p) => s + p.count, 0);
+  const avg = total / points.length;
+  const spikeCount = enriched.filter((p) => p.isSpike).length;
+  const peak = enriched.reduce((best, p) => (p.count > best.count ? p : best), enriched[0]);
+
+  return (
+    <div className="rounded-2xl border border-border bg-background p-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <BarChart3 className="w-4 h-4 text-violet-500" />
+            <h3 className="text-sm font-semibold">일일 등록 현황</h3>
+            {spikeCount > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600">
+                급등 {spikeCount}일
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            평소 대비 1.5배 이상 튄 날은 주황색으로 표시돼요
+          </p>
+        </div>
+        <div className="shrink-0 grid grid-cols-2 gap-x-4 gap-y-0.5 text-right">
+          <p className="text-[10px] text-muted-foreground">일평균</p>
+          <p className="text-[10px] text-muted-foreground">최고</p>
+          <p className="text-xs font-semibold tabular-nums">{formatNumber(Math.round(avg))}건</p>
+          <p className="text-xs font-semibold tabular-nums text-amber-600">{formatNumber(peak.count)}건</p>
+        </div>
+      </div>
+      <ResponsiveContainer width="100%" height={200}>
+        <BarChart data={enriched} margin={{ top: 8, right: 10, bottom: 4, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.45} vertical={false} />
+          <XAxis
+            dataKey="label"
+            tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+            tickLine={false}
+            axisLine={false}
+            minTickGap={18}
+          />
+          <YAxis
+            tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+            tickLine={false}
+            axisLine={false}
+            allowDecimals={false}
+            width={44}
+            domain={[0, Math.ceil(max * 1.1)]}
+          />
+          <Tooltip
+            cursor={{ fill: "hsl(var(--muted))", opacity: 0.3 }}
+            formatter={(value, _name, item) => {
+              const p = item?.payload as { baselineAvg?: number; isSpike?: boolean } | undefined;
+              const main = `${formatNumber(Number(value))}건`;
+              if (p?.isSpike && p.baselineAvg) {
+                return [`${main} (평소 ${Math.round(p.baselineAvg)}건 대비 +${Math.round(((Number(value) - p.baselineAvg) / p.baselineAvg) * 100)}%)`, "일일 등록"];
+              }
+              return [main, "일일 등록"];
+            }}
+            labelFormatter={(_, payload) => (payload?.[0]?.payload as { date?: string })?.date ?? ""}
+            contentStyle={{
+              backgroundColor: "hsl(var(--card))",
+              border: "1px solid hsl(var(--border))",
+              borderRadius: "0.75rem",
+              fontSize: "12px",
+            }}
+          />
+          <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={32}>
+            {enriched.map((p) => (
+              <Cell key={p.date} fill={p.isSpike ? "#f59e0b" : "#8b5cf6"} fillOpacity={p.isSpike ? 0.9 : 0.75} />
+            ))}
+          </Bar>
+        </BarChart>
       </ResponsiveContainer>
     </div>
   );
@@ -622,6 +718,9 @@ export default function RealtimeReport({ data, loading, rangeLabel }: Props) {
 
         <div className="mt-4">
           <CumulativeLineChart points={data.cumulativeTrend} />
+        </div>
+        <div className="mt-4">
+          <DailyBarChart points={data.cumulativeTrend} />
         </div>
         {data.dailyUtmTrend && (
           <div className="mt-4">

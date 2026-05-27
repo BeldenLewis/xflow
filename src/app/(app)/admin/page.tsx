@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { prisma } from "@/lib/prisma";
 import { formatKstDateTime } from "@/lib/datetime";
 import { isSuperAdminEmail, SUPER_ADMIN_EMAIL } from "@/lib/super-admin";
@@ -362,6 +363,29 @@ async function getDbHealth() {
   }
 }
 
+// Supabase Auth에서 사용자 마지막 접속/가입 시각 조회.
+// 페이지네이션 1000건까지 일괄 (소규모 도구라 충분), 더 많으면 추가 페이지 처리.
+async function getAuthUserMap(): Promise<Map<string, { lastSignInAt: string | null; createdAt: string | null }>> {
+  const map = new Map<string, { lastSignInAt: string | null; createdAt: string | null }>();
+  try {
+    const supabaseAdmin = createAdminClient();
+    let page = 1;
+    while (true) {
+      const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 200 });
+      if (error) break;
+      for (const u of data.users) {
+        map.set(u.id, { lastSignInAt: u.last_sign_in_at ?? null, createdAt: u.created_at ?? null });
+      }
+      if (!data.users.length || data.users.length < 200) break;
+      page += 1;
+      if (page > 25) break; // 안전장치 — 최대 5,000명까지
+    }
+  } catch (err) {
+    console.error("[admin] getAuthUserMap failed:", err);
+  }
+  return map;
+}
+
 export default async function SuperAdminPage({ searchParams }: { searchParams?: AdminSearchParams }) {
   const params = searchParams ? await searchParams : {};
   const query = firstParam(params.q).trim();
@@ -405,6 +429,7 @@ export default async function SuperAdminPage({ searchParams }: { searchParams?: 
     projects,
     collectSources,
     recentActivities,
+    authUserMap,
   ] = await Promise.all([
     prisma.user.count(),
     prisma.workspace.count({ where: { deletedAt: null } }),
@@ -549,6 +574,7 @@ export default async function SuperAdminPage({ searchParams }: { searchParams?: 
         user: { select: { email: true, name: true } },
       },
     }),
+    getAuthUserMap(),
   ]);
 
   const envChecks = [
@@ -718,6 +744,10 @@ export default async function SuperAdminPage({ searchParams }: { searchParams?: 
                     const firstOwnedWorkspace = ownerMemberships[0]?.workspace;
                     const canDelete = !isSuperAdminEmail(adminUser.email) && activeOwnerMemberships.length === 0;
 
+                    const authInfo = authUserMap.get(adminUser.id);
+                    const lastSignIn = authInfo?.lastSignInAt;
+                    const isRecentlyActive = lastSignIn && (Date.now() - new Date(lastSignIn).getTime()) < 7 * 24 * 60 * 60_000;
+
                     return (
                       <article key={adminUser.id} className="border-t border-border py-4">
                         <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
@@ -728,12 +758,20 @@ export default async function SuperAdminPage({ searchParams }: { searchParams?: 
                                 {isSuperAdminEmail(adminUser.email) ? "슈퍼어드민" : "사용자"}
                               </StatusPill>
                               {activeOwnerMemberships.length > 0 && <StatusPill tone="warn">소유자</StatusPill>}
+                              {isRecentlyActive && <StatusPill tone="good">최근 활동</StatusPill>}
                             </div>
                             <p className="mt-1 truncate text-xs text-muted-foreground">{adminUser.email}</p>
                             <p className="mt-2 text-xs text-muted-foreground">
                               가입 {formatKstDateTime(adminUser.createdAt)}
-                              {firstOwnedWorkspace && ` · 첫 소유 워크스페이스 ${firstOwnedWorkspace.name} (${formatKstDateTime(firstOwnedWorkspace.createdAt).slice(0, 10)})`}
+                              {lastSignIn
+                                ? ` · 마지막 접속 ${formatKstDateTime(new Date(lastSignIn))}`
+                                : " · 접속 기록 없음"}
                             </p>
+                            {firstOwnedWorkspace && (
+                              <p className="mt-1 truncate text-[11px] text-muted-foreground/80">
+                                첫 소유 워크스페이스 {firstOwnedWorkspace.name} ({formatKstDateTime(firstOwnedWorkspace.createdAt).slice(0, 10)})
+                              </p>
+                            )}
                           </div>
                           <div className="grid grid-cols-2 gap-x-5 gap-y-1 text-xs text-muted-foreground lg:text-right">
                             <span>워크스페이스 {adminUser._count.memberships}</span>

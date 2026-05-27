@@ -727,6 +727,15 @@ export default function RealtimeReport({ data, loading, rangeLabel }: Props) {
             <UtmTrendChart trend={data.dailyUtmTrend} />
           </div>
         )}
+        <div className="mt-4">
+          <section className="rounded-2xl border border-border bg-background p-4">
+            <div className="flex items-center gap-2 mb-4">
+              <Clock3 className="w-4 h-4 text-violet-500" />
+              <h3 className="text-sm font-semibold">요일/시간별 등록 성과</h3>
+            </div>
+            <Heatmap heatmap={data.heatmap} />
+          </section>
+        </div>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
@@ -750,14 +759,6 @@ export default function RealtimeReport({ data, loading, rangeLabel }: Props) {
       </div>
 
       <EmailDomainSection items={data.emailDomainTop} total={data.emailDomainTotal} />
-
-      <section className="rounded-[24px] border border-border bg-background p-5">
-        <div className="flex items-center gap-2 mb-4">
-          <Clock3 className="w-4 h-4 text-violet-500" />
-          <h3 className="text-sm font-semibold">요일/시간별 등록 성과</h3>
-        </div>
-        <Heatmap heatmap={data.heatmap} />
-      </section>
     </section>
   );
 }

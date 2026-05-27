@@ -82,6 +82,7 @@ export function Sidebar() {
 
   const [userEmail, setUserEmail] = useState("");
   const [userName, setUserName] = useState("");
+  const [dbSuperAdmin, setDbSuperAdmin] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -91,11 +92,15 @@ export function Sidebar() {
     fetch("/api/user/profile").then((r) => r.json()).then((d) => {
       if (d.profile?.name) setUserName(d.profile.name);
     }).catch(() => {});
+    // /api/workspace 응답에 isSuperAdmin 포함됨 — 사이드바 admin 메뉴 표시용
+    fetch("/api/workspace").then((r) => r.json()).then((d) => {
+      if (d.isSuperAdmin === true) setDbSuperAdmin(true);
+    }).catch(() => {});
   }, [supabase.auth]);
 
   const displayName = userName || userEmail;
   const initial = displayName?.[0]?.toUpperCase() ?? "?";
-  const isSuperAdmin = isSuperAdminEmail(userEmail);
+  const isSuperAdmin = isSuperAdminEmail(userEmail) || dbSuperAdmin;
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();

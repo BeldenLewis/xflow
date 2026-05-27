@@ -24,12 +24,14 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { prisma } from "@/lib/prisma";
 import { formatKstDateTime } from "@/lib/datetime";
-import { isSuperAdminEmail, SUPER_ADMIN_EMAIL } from "@/lib/super-admin";
+import { isSuperAdminEmail, checkSuperAdminAccess, isRootSuperAdmin, SUPER_ADMIN_EMAIL } from "@/lib/super-admin";
 import {
   deleteUserAction,
   deleteWorkspacePermanentlyAction,
+  grantSuperAdminAction,
   renameProjectAction,
   renameWorkspaceAction,
+  revokeSuperAdminAction,
   setCollectSourceActiveAction,
   setProjectArchivedAction,
   setWorkspaceArchivedAction,
@@ -141,6 +143,8 @@ const ACTIVITY_LABELS: Record<string, string> = {
   "admin.source_paused": "관리자 — 소스 일시중지",
   "admin.user_deleted": "관리자 — 사용자 삭제",
   "admin.workspace_permanently_deleted": "관리자 — 워크스페이스 영구 삭제",
+  "admin.super_admin_granted": "관리자 — 슈퍼어드민 권한 부여",
+  "admin.super_admin_revoked": "관리자 — 슈퍼어드민 권한 회수",
 };
 
 function adminActivityLabel(action: string): string {
@@ -396,7 +400,10 @@ export default async function SuperAdminPage({ searchParams }: { searchParams?: 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (!isSuperAdminEmail(user?.email)) notFound();
+  // env 기반 root + DB isSuperAdmin 둘 다 허용
+  if (!(await checkSuperAdminAccess(user ? { id: user.id, email: user.email } : null))) {
+    notFound();
+  }
 
   const now = new Date();
   const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -456,6 +463,7 @@ export default async function SuperAdminPage({ searchParams }: { searchParams?: 
         id: true,
         email: true,
         name: true,
+        isSuperAdmin: true,
         createdAt: true,
         memberships: {
           orderBy: { joinedAt: "asc" },
@@ -742,7 +750,10 @@ export default async function SuperAdminPage({ searchParams }: { searchParams?: 
                     const ownerMemberships = adminUser.memberships.filter((membership) => membership.role === "OWNER");
                     const activeOwnerMemberships = ownerMemberships.filter((membership) => !membership.workspace.deletedAt);
                     const firstOwnedWorkspace = ownerMemberships[0]?.workspace;
-                    const canDelete = !isSuperAdminEmail(adminUser.email) && activeOwnerMemberships.length === 0;
+                    const isEnvAdmin = isRootSuperAdmin(adminUser.email);
+                    const isAnySuperAdmin = isEnvAdmin || adminUser.isSuperAdmin === true;
+                    const canDelete = !isAnySuperAdmin && activeOwnerMemberships.length === 0;
+                    const canGrantOrRevoke = !isEnvAdmin && adminUser.id !== user?.id;
 
                     const authInfo = authUserMap.get(adminUser.id);
                     const lastSignIn = authInfo?.lastSignInAt;
@@ -754,8 +765,8 @@ export default async function SuperAdminPage({ searchParams }: { searchParams?: 
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
                               <h3 className="truncate text-sm font-semibold">{adminUser.name || "이름 없음"}</h3>
-                              <StatusPill tone={isSuperAdminEmail(adminUser.email) ? "warn" : "neutral"}>
-                                {isSuperAdminEmail(adminUser.email) ? "슈퍼어드민" : "사용자"}
+                              <StatusPill tone={isAnySuperAdmin ? "warn" : "neutral"}>
+                                {isEnvAdmin ? "슈퍼어드민 (root)" : adminUser.isSuperAdmin ? "슈퍼어드민" : "사용자"}
                               </StatusPill>
                               {activeOwnerMemberships.length > 0 && <StatusPill tone="warn">소유자</StatusPill>}
                               {isRecentlyActive && <StatusPill tone="good">최근 활동</StatusPill>}
@@ -859,8 +870,8 @@ export default async function SuperAdminPage({ searchParams }: { searchParams?: 
                               </div>
                               {!canDelete ? (
                                 <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs leading-5 text-amber-700 dark:text-amber-300">
-                                  {isSuperAdminEmail(adminUser.email)
-                                    ? "슈퍼어드민 계정은 삭제할 수 없습니다."
+                                  {isAnySuperAdmin
+                                    ? "슈퍼어드민 계정은 삭제할 수 없습니다. 권한 회수 후 다시 시도해주세요."
                                     : "활성 워크스페이스 소유자입니다. 소유권 이전 또는 보관 후 삭제할 수 있습니다."}
                                 </div>
                               ) : (
@@ -873,6 +884,39 @@ export default async function SuperAdminPage({ searchParams }: { searchParams?: 
                                     회원 삭제
                                   </SubmitButton>
                                 </form>
+                              )}
+
+                              {/* 슈퍼어드민 권한 부여/회수 */}
+                              {canGrantOrRevoke && (
+                                <div className="mt-3 rounded-lg border border-violet-500/20 bg-violet-500/5 p-3 space-y-2">
+                                  <p className="text-[11px] leading-5 text-violet-700 dark:text-violet-300">
+                                    {adminUser.isSuperAdmin
+                                      ? "이 사용자는 슈퍼어드민 권한을 가집니다. /admin 페이지 + 모든 워크스페이스 관리 가능."
+                                      : "권한 부여 시 /admin 페이지 접근 + 모든 워크스페이스/사용자 관리 가능."}
+                                  </p>
+                                  <form
+                                    action={adminUser.isSuperAdmin ? revokeSuperAdminAction : grantSuperAdminAction}
+                                    className="grid grid-cols-[1fr_auto] gap-2"
+                                  >
+                                    <input type="hidden" name="userId" value={adminUser.id} />
+                                    <input
+                                      name="reason"
+                                      required
+                                      placeholder={adminUser.isSuperAdmin ? "권한 회수 사유" : "권한 부여 사유"}
+                                      aria-label="슈퍼어드민 권한 변경 사유"
+                                      className="h-9 rounded-lg border border-violet-500/30 bg-background px-3 text-xs outline-none focus:border-violet-500"
+                                    />
+                                    <SubmitButton tone={adminUser.isSuperAdmin ? "danger" : "good"}>
+                                      <ShieldCheck className="mr-1 size-3.5" />
+                                      {adminUser.isSuperAdmin ? "권한 회수" : "권한 부여"}
+                                    </SubmitButton>
+                                  </form>
+                                </div>
+                              )}
+                              {isEnvAdmin && (
+                                <div className="mt-3 rounded-lg border border-violet-500/20 bg-violet-500/5 px-3 py-2 text-[11px] leading-5 text-violet-700 dark:text-violet-300">
+                                  환경변수(SUPER_ADMIN_EMAILS)로 부여된 root 어드민입니다. UI에서 회수할 수 없어요.
+                                </div>
                               )}
                             </div>
                           </div>

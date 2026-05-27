@@ -5,15 +5,15 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isSuperAdminEmail } from "@/lib/super-admin";
+import { isSuperAdminEmail, checkSuperAdminAccess, isRootSuperAdmin } from "@/lib/super-admin";
 
 async function requireSuperAdminUser() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user || !isSuperAdminEmail(user.email)) {
-    throw new Error("슈퍼어드민 권한이 필요합니다.");
-  }
+  if (!user) throw new Error("슈퍼어드민 권한이 필요합니다.");
+  const allowed = await checkSuperAdminAccess({ id: user.id, email: user.email });
+  if (!allowed) throw new Error("슈퍼어드민 권한이 필요합니다.");
 
   return { id: user.id, email: user.email };
 }
@@ -233,6 +233,7 @@ export async function deleteUserAction(formData: FormData) {
       id: true,
       email: true,
       name: true,
+      isSuperAdmin: true,
       memberships: {
         select: {
           role: true,
@@ -253,7 +254,9 @@ export async function deleteUserAction(formData: FormData) {
   });
 
   if (!targetUser) throw new Error("사용자를 찾을 수 없습니다.");
-  if (isSuperAdminEmail(targetUser.email)) throw new Error("슈퍼어드민 계정은 삭제할 수 없습니다.");
+  if (isSuperAdminEmail(targetUser.email) || targetUser.isSuperAdmin) {
+    throw new Error("슈퍼어드민 계정은 삭제할 수 없습니다. 권한을 먼저 회수해주세요.");
+  }
   if (confirmEmail !== targetUser.email.toLowerCase()) throw new Error("확인 이메일이 일치하지 않습니다.");
 
   const ownedActiveWorkspaces = targetUser.memberships.filter((membership) => (
@@ -301,4 +304,68 @@ export async function deleteUserAction(formData: FormData) {
   }
 
   finishAdminAction(`사용자를 삭제했습니다.${authMessage}`);
+}
+
+export async function grantSuperAdminAction(formData: FormData) {
+  const admin = await requireSuperAdminUser();
+  const targetUserId = getRequiredString(formData, "userId", "사용자 ID");
+  const reason = getRequiredString(formData, "reason", "권한 부여 사유", 240);
+
+  if (targetUserId === admin.id) throw new Error("자기 자신의 권한은 변경할 수 없습니다.");
+
+  const target = await prisma.user.findUnique({
+    where: { id: targetUserId },
+    select: { id: true, email: true, name: true, isSuperAdmin: true },
+  });
+  if (!target) throw new Error("사용자를 찾을 수 없습니다.");
+  if (isRootSuperAdmin(target.email)) throw new Error("환경변수로 부여된 root 어드민은 UI에서 변경할 수 없습니다.");
+  if (target.isSuperAdmin) throw new Error("이미 슈퍼어드민입니다.");
+
+  await prisma.user.update({ where: { id: targetUserId }, data: { isSuperAdmin: true } });
+
+  const adminMembership = await prisma.workspaceMember.findFirst({
+    where: { userId: admin.id, workspace: { deletedAt: null } },
+  });
+  if (adminMembership) {
+    await createAdminLog({
+      workspaceId: adminMembership.workspaceId,
+      userId: admin.id,
+      action: "admin.super_admin_granted",
+      meta: { targetUserId, targetEmail: target.email, targetName: target.name, reason },
+    });
+  }
+
+  finishAdminAction(`${target.email}에게 슈퍼어드민 권한을 부여했습니다.`);
+}
+
+export async function revokeSuperAdminAction(formData: FormData) {
+  const admin = await requireSuperAdminUser();
+  const targetUserId = getRequiredString(formData, "userId", "사용자 ID");
+  const reason = getRequiredString(formData, "reason", "권한 회수 사유", 240);
+
+  if (targetUserId === admin.id) throw new Error("자기 자신의 권한은 회수할 수 없습니다.");
+
+  const target = await prisma.user.findUnique({
+    where: { id: targetUserId },
+    select: { id: true, email: true, name: true, isSuperAdmin: true },
+  });
+  if (!target) throw new Error("사용자를 찾을 수 없습니다.");
+  if (isRootSuperAdmin(target.email)) throw new Error("환경변수로 부여된 root 어드민은 UI에서 회수할 수 없습니다.");
+  if (!target.isSuperAdmin) throw new Error("슈퍼어드민이 아닙니다.");
+
+  await prisma.user.update({ where: { id: targetUserId }, data: { isSuperAdmin: false } });
+
+  const adminMembership = await prisma.workspaceMember.findFirst({
+    where: { userId: admin.id, workspace: { deletedAt: null } },
+  });
+  if (adminMembership) {
+    await createAdminLog({
+      workspaceId: adminMembership.workspaceId,
+      userId: admin.id,
+      action: "admin.super_admin_revoked",
+      meta: { targetUserId, targetEmail: target.email, targetName: target.name, reason },
+    });
+  }
+
+  finishAdminAction(`${target.email}의 슈퍼어드민 권한을 회수했습니다.`);
 }

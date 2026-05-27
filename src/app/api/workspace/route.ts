@@ -9,13 +9,23 @@ export async function GET() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
-  const memberships = await prisma.workspaceMember.findMany({
-    where: { userId: user.id, workspace: { deletedAt: null } },
-    include: { workspace: { include: { projects: { orderBy: { createdAt: "asc" } } } } },
-    orderBy: { joinedAt: "asc" },
-  });
+  const [memberships, dbUser] = await Promise.all([
+    prisma.workspaceMember.findMany({
+      where: { userId: user.id, workspace: { deletedAt: null } },
+      include: { workspace: { include: { projects: { orderBy: { createdAt: "asc" } } } } },
+      orderBy: { joinedAt: "asc" },
+    }),
+    prisma.user.findUnique({ where: { id: user.id }, select: { isSuperAdmin: true } }),
+  ]);
 
-  if (memberships.length === 0) return NextResponse.json({ workspace: null, workspaces: [], projects: [] });
+  // env 기반 root 어드민 또는 DB 플래그
+  const isSuperAdmin = (() => {
+    const envEmails = (process.env.SUPER_ADMIN_EMAILS ?? "lynlea@exporum.com").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+    if (user.email && envEmails.includes(user.email.toLowerCase())) return true;
+    return dbUser?.isSuperAdmin === true;
+  })();
+
+  if (memberships.length === 0) return NextResponse.json({ workspace: null, workspaces: [], projects: [], isSuperAdmin });
 
   const all = memberships.map((m) => ({
     id: m.workspace.id,
@@ -28,6 +38,7 @@ export async function GET() {
     workspace: all[0],
     workspaces: all,
     projects: memberships[0].workspace.projects,
+    isSuperAdmin,
   });
 }
 

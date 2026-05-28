@@ -209,18 +209,7 @@ export default function TestModal({ sourceId, siteUrl, fieldMappings, onClose, o
                           ))}
                         </div>
                       </div>
-                      {check.siteUrl && (
-                        <CheckRow
-                          ok={check.siteUrlMatchesPattern === true}
-                          warn={check.siteUrlMatchesPattern === false}
-                          label={check.siteUrlMatchesPattern === true
-                            ? "현재 사이트 URL이 패턴과 매칭됨"
-                            : "현재 사이트 URL이 패턴과 매칭되지 않음"}
-                          detail={check.siteUrlMatchesPattern === true
-                            ? "이 페이지에서 폼 감지가 활성화돼요"
-                            : "이 페이지에선 스크립트가 폼 감지를 건너뛰어요. 패턴 설정을 확인하세요."}
-                        />
-                      )}
+                      <PatternTester patterns={check.formPagePatterns} />
                     </>
                   ) : (
                     <div className="p-2.5 rounded-lg border border-border bg-secondary/30">
@@ -376,6 +365,49 @@ function CheckRow({ ok, warn, label, detail }: { ok: boolean; warn: boolean; lab
         <p className="text-xs font-medium">{label}</p>
         <p className="text-[11px] text-muted-foreground truncate">{detail}</p>
       </div>
+    </div>
+  );
+}
+
+function PatternTester({ patterns }: { patterns: string[] }) {
+  const [url, setUrl] = useState("");
+  const trimmed = url.trim();
+
+  // 입력값에서 pathname 추출 — 전체 URL이든 path만이든 대응
+  let pathname: string | null = null;
+  if (trimmed) {
+    try {
+      const u = new URL(trimmed.startsWith("http") ? trimmed : `https://example.com${trimmed.startsWith("/") ? "" : "/"}${trimmed}`);
+      pathname = u.pathname;
+    } catch {
+      pathname = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+    }
+  }
+
+  function matches(path: string, pattern: string): boolean {
+    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+    return new RegExp(`^${escaped}$`).test(path);
+  }
+
+  const isMatch = pathname ? patterns.some((p) => matches(pathname!, p)) : null;
+
+  return (
+    <div className="p-2.5 rounded-lg border border-border bg-secondary/30 space-y-2">
+      <p className="text-[11px] text-muted-foreground">테스트 — 특정 URL이 폼 감지 대상인지 확인</p>
+      <input
+        type="text"
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        placeholder="예: /event/register 또는 https://site.com/event/register"
+        className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs font-mono focus:outline-none focus:border-violet-400"
+      />
+      {pathname && isMatch !== null && (
+        <div className={`flex items-center gap-1.5 text-[11px] ${isMatch ? "text-emerald-600" : "text-amber-600"}`}>
+          {isMatch ? <Check className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
+          <span className="font-medium">{isMatch ? "매칭됨 — 이 페이지에서 폼 감지 작동" : "매칭 안 됨 — 이 페이지에서는 감지 건너뜀"}</span>
+          <code className="ml-1 px-1 rounded bg-background border border-border font-mono text-[10px]">{pathname}</code>
+        </div>
+      )}
     </div>
   );
 }

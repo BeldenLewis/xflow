@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Filter, LayoutDashboard, Loader2, RefreshCw, X } from "lucide-react";
+import { Filter, LayoutDashboard, Loader2, RefreshCw, Share2, X } from "lucide-react";
 import { useWorkspace } from "@/contexts/workspace";
 import { kstDateString } from "@/lib/datetime";
 import DateRangePicker, { DateRange } from "./DateRangePicker";
 import RealtimeReport, { type RealtimeReportData } from "./RealtimeReport";
+import { DashboardShareModal } from "./DashboardShareModal";
 
 const AUTO_REFRESH_MS = 30_000;
 const spring = { type: "spring", stiffness: 420, damping: 30 } as const;
@@ -46,6 +47,7 @@ export default function DashboardClient() {
   const [reportData, setReportData] = useState<RealtimeReportData | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const filterCount = useMemo(() => getFilterCount(filters), [filters]);
   const hasActiveFilter = filterCount > 0;
@@ -175,6 +177,17 @@ export default function DashboardClient() {
             whileHover={{ y: -1 }}
             whileTap={{ scale: 0.96 }}
             transition={spring}
+            onClick={() => setShareOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            title="공유"
+          >
+            <Share2 className="h-3.5 w-3.5" />
+            공유
+          </motion.button>
+          <motion.button
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.96 }}
+            transition={spring}
             onClick={() => setRefreshTick((tick) => tick + 1)}
             className="rounded-xl border border-border p-1.5 text-muted-foreground transition-colors hover:bg-secondary"
             title="새로고침"
@@ -293,6 +306,15 @@ export default function DashboardClient() {
       </AnimatePresence>
 
       <RealtimeReport data={reportData} loading={reportLoading} rangeLabel={range.label} />
+
+      {currentProject && (
+        <DashboardShareModal
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+          projectId={currentProject.id}
+          projectName={currentProject.name}
+        />
+      )}
     </div>
   );
 }

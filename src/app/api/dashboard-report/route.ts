@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 
-interface ReportFilters {
+export interface ReportFilters {
   sourceId?: string | null;
   utmSource?: string | null;
   utmMedium?: string | null;
@@ -633,28 +633,23 @@ function buildCumulativeTrend(records: TimedRecord[], from: Date, to: Date, init
   return points;
 }
 
-export async function POST(request: Request) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
+export interface GenerateReportOptions {
+  workspaceId: string;
+  projectId: string;
+  from?: string;
+  to?: string;
+  filters?: ReportFilters;
+}
 
-  const body: RequestBody = await request.json();
-  const { workspaceId, projectId, filters } = body;
-  if (!workspaceId || !projectId) {
-    return NextResponse.json({ error: "workspaceId, projectId 필요" }, { status: 400 });
-  }
-
-  const membership = await prisma.workspaceMember.findUnique({
-    where: { userId_workspaceId: { userId: user.id, workspaceId } },
-  });
-  if (!membership) return NextResponse.json({ error: "접근 권한 없음" }, { status: 403 });
+export async function generateDashboardReport(options: GenerateReportOptions) {
+  const { workspaceId, projectId, filters } = options;
 
   const project = await prisma.project.findFirst({ where: { id: projectId, workspaceId } });
-  if (!project) return NextResponse.json({ error: "프로젝트 없음" }, { status: 404 });
+  if (!project) return { error: "프로젝트 없음" as const };
 
   const now = new Date();
-  const to = parseDate(body.to, now);
-  const from = parseDate(body.from, new Date(to.getTime() - 7 * DAY_MS));
+  const to = parseDate(options.to, now);
+  const from = parseDate(options.from, new Date(to.getTime() - 7 * DAY_MS));
   const todayStart = getKstDayStart(now);
   const yesterdayStart = new Date(todayStart.getTime() - DAY_MS);
   const span = Math.max(to.getTime() - from.getTime(), DAY_MS);
@@ -853,28 +848,53 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.json({
-    generatedAt: now.toISOString(),
-    project: { id: project.id, name: project.name },
-    performance: {
-      yesterdayCount,
-      todayCount,
-      cumulativeCount,
-      rangeCount,
-      previousRangeCount,
-      rangeChange,
+  return {
+    data: {
+      generatedAt: now.toISOString(),
+      project: { id: project.id, name: project.name },
+      performance: {
+        yesterdayCount,
+        todayCount,
+        cumulativeCount,
+        rangeCount,
+        previousRangeCount,
+        rangeChange,
+      },
+      composition,
+      emailDomainTop,
+      emailDomainTotal,
+      dedup,
+      anomaly,
+      cumulativeTrend,
+      dailyUtmTrend: buildDailyUtmTrendFromRows(utmTrendRows, from, to),
+      utmTop,
+      utmBySource,
+      utmByMedium,
+      utmBySourceMedium,
+      heatmap: buildHeatmapFromRows(heatmapRows),
     },
-    composition,
-    emailDomainTop,
-    emailDomainTotal,
-    dedup,
-    anomaly,
-    cumulativeTrend,
-    dailyUtmTrend: buildDailyUtmTrendFromRows(utmTrendRows, from, to),
-    utmTop,
-    utmBySource,
-    utmByMedium,
-    utmBySourceMedium,
-    heatmap: buildHeatmapFromRows(heatmapRows),
+  };
+}
+
+export async function POST(request: Request) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
+
+  const body: RequestBody = await request.json();
+  const { workspaceId, projectId, filters, from, to } = body;
+  if (!workspaceId || !projectId) {
+    return NextResponse.json({ error: "workspaceId, projectId 필요" }, { status: 400 });
+  }
+
+  const membership = await prisma.workspaceMember.findUnique({
+    where: { userId_workspaceId: { userId: user.id, workspaceId } },
   });
+  if (!membership) return NextResponse.json({ error: "접근 권한 없음" }, { status: 403 });
+
+  const result = await generateDashboardReport({ workspaceId, projectId, filters, from, to });
+  if ("error" in result) {
+    return NextResponse.json({ error: result.error }, { status: 404 });
+  }
+  return NextResponse.json(result.data);
 }

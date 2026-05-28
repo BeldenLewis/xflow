@@ -115,6 +115,9 @@ model Project {
   analyticsShareToken        String?   @unique
   analyticsShareEnabled      Boolean   @default(false)
   analyticsSharePasswordHash String?
+  dashboardShareToken        String?   @unique
+  dashboardShareEnabled      Boolean   @default(false)
+  dashboardSharePasswordHash String?
   createdAt                  DateTime  @default(now())
   updatedAt                  DateTime  @updatedAt
 

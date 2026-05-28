@@ -1284,6 +1284,34 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                   </div>
                 </div>
               )}
+
+              {/* A: 1줄 설치 (권장) */}
+              {browserOrigin && (
+                <div className="rounded-2xl border border-violet-400/50 bg-gradient-to-br from-violet-500/10 via-violet-500/5 to-transparent p-5 space-y-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-violet-500 shrink-0" />
+                        <p className="text-sm font-semibold">1줄 설치 (권장)</p>
+                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-violet-500 text-white">NEW</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                        사이트 공통 헤더에 한 번만 붙여넣으면 됩니다. 필드/리다이렉트 수정도 자동 반영돼요.
+                      </p>
+                    </div>
+                    <CopyCodeButton text={`<script async src="${browserOrigin}/s/${id}"></script>`} />
+                  </div>
+                  <pre className="p-3 rounded-xl bg-secondary/80 border border-border text-xs font-mono overflow-x-auto whitespace-pre leading-relaxed">
+{`<script async src="${browserOrigin}/s/${id}"></script>`}
+                  </pre>
+                  <ul className="text-[11px] text-muted-foreground space-y-1">
+                    <li className="flex items-center gap-1.5"><Check className="w-3 h-3 text-violet-500 shrink-0" /> 짧음 — 사이트 코드에 노출되어도 노이즈 없음</li>
+                    <li className="flex items-center gap-1.5"><Check className="w-3 h-3 text-violet-500 shrink-0" /> 자동 업데이트 — 필드를 바꿔도 사이트 재설치 불필요 (5~10분 캐시)</li>
+                    <li className="flex items-center gap-1.5"><Check className="w-3 h-3 text-violet-500 shrink-0" /> CDN 캐싱으로 빠름</li>
+                  </ul>
+                </div>
+              )}
+
               {/* B: 콘솔 스니퍼 */}
               <div className="p-4 rounded-2xl border border-border">
                 <div className="flex items-center gap-2 mb-3">
@@ -1326,6 +1354,17 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                 </div>
               </div>
 
+              {/* 고급: 인라인 설치 (전체 코드) — 1줄 설치가 안 되는 환경용 */}
+              <details className="group rounded-2xl border border-border bg-background/50">
+                <summary className="cursor-pointer list-none px-4 py-3 flex items-center justify-between gap-3 hover:bg-secondary/40 rounded-2xl transition-colors">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">고급: 인라인 설치 (전체 코드)</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">CSP나 외부 스크립트가 막힌 환경에서만 사용하세요. 코드 수정 시 사이트에 다시 붙여넣어야 합니다.</p>
+                  </div>
+                  <span className="shrink-0 text-xs text-muted-foreground group-open:hidden">펼치기</span>
+                  <span className="shrink-0 text-xs text-muted-foreground hidden group-open:inline">접기</span>
+                </summary>
+                <div className="px-4 pb-4 pt-2 space-y-5">
               {/* 공통 UTM 보존 코드 */}
               <div>
                 {scriptLoading ? (
@@ -1409,6 +1448,8 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                   </div>
                 )}
               </div>
+                </div>
+              </details>
             </div>
           )}
 

@@ -20,8 +20,12 @@ interface SiteCheck {
   siteReachable: boolean;
   statusCode: number | null;
   scriptDetected: "yes" | "no" | "unknown";
+  loaderDetected: boolean;
   apiKeyDetected: boolean;
   collectUrlDetected: boolean;
+  formPagePatterns: string[];
+  patternsConfigured: boolean;
+  siteUrlMatchesPattern: boolean | null;
   hint: string;
 }
 
@@ -159,17 +163,73 @@ export default function TestModal({ sourceId, siteUrl, fieldMappings, onClose, o
                   />
                 )}
                 {check.siteReachable && (
-                  <CheckRow
-                    ok={check.apiKeyDetected}
-                    warn={!check.apiKeyDetected && check.collectUrlDetected}
-                    label="스크립트 탐지"
-                    detail={
-                      check.apiKeyDetected ? "이 소스의 API 키 발견" :
-                      check.collectUrlDetected ? "collect URL은 있으나 API 키가 다름" :
-                      "스크립트 흔적 없음 (외부 .js 로드 시 탐지 불가)"
-                    }
-                  />
+                  <div className="space-y-2 pt-1">
+                    <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">스크립트 설치 방식</p>
+                    {check.loaderDetected ? (
+                      <CheckRow
+                        ok
+                        warn={false}
+                        label="1줄 loader 설치됨 (권장 방식)"
+                        detail={`/s/${sourceId.slice(0, 8)}… 가 HTML에서 발견됨`}
+                      />
+                    ) : check.apiKeyDetected ? (
+                      <CheckRow
+                        ok
+                        warn={false}
+                        label="인라인 스크립트 설치됨"
+                        detail="1줄 loader 사용을 권장합니다"
+                      />
+                    ) : check.collectUrlDetected ? (
+                      <CheckRow
+                        ok={false}
+                        warn
+                        label="다른 소스의 스크립트로 보입니다"
+                        detail="collect URL은 있지만 이 소스의 식별자는 없어요"
+                      />
+                    ) : (
+                      <CheckRow
+                        ok={false}
+                        warn={false}
+                        label="스크립트 흔적 없음"
+                        detail="외부 .js 로드 시 탐지가 안 될 수 있어요"
+                      />
+                    )}
+                  </div>
                 )}
+
+                <div className="space-y-2 pt-1">
+                  <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">페이지 패턴</p>
+                  {check.patternsConfigured ? (
+                    <>
+                      <div className="p-2.5 rounded-lg border border-border bg-secondary/30">
+                        <p className="text-[11px] text-muted-foreground mb-1">등록된 패턴 ({check.formPagePatterns.length}개)</p>
+                        <div className="flex flex-wrap gap-1">
+                          {check.formPagePatterns.map((p) => (
+                            <code key={p} className="text-[10px] px-1.5 py-0.5 rounded bg-background border border-border font-mono">{p}</code>
+                          ))}
+                        </div>
+                      </div>
+                      {check.siteUrl && (
+                        <CheckRow
+                          ok={check.siteUrlMatchesPattern === true}
+                          warn={check.siteUrlMatchesPattern === false}
+                          label={check.siteUrlMatchesPattern === true
+                            ? "현재 사이트 URL이 패턴과 매칭됨"
+                            : "현재 사이트 URL이 패턴과 매칭되지 않음"}
+                          detail={check.siteUrlMatchesPattern === true
+                            ? "이 페이지에서 폼 감지가 활성화돼요"
+                            : "이 페이지에선 스크립트가 폼 감지를 건너뛰어요. 패턴 설정을 확인하세요."}
+                        />
+                      )}
+                    </>
+                  ) : (
+                    <div className="p-2.5 rounded-lg border border-border bg-secondary/30">
+                      <p className="text-xs font-medium">패턴 미설정</p>
+                      <p className="text-[11px] text-muted-foreground">모든 페이지에서 폼 감지가 동작합니다.</p>
+                    </div>
+                  )}
+                </div>
+
                 {check.hint && (
                   <p className="text-[11px] text-muted-foreground bg-secondary/30 border border-border rounded-lg px-3 py-2 mt-2 leading-relaxed">
                     {check.hint}
@@ -287,7 +347,12 @@ export default function TestModal({ sourceId, siteUrl, fieldMappings, onClose, o
                   <span className="text-sm font-medium text-amber-700 dark:text-amber-400">2분 안에 데이터가 도착하지 않았어요</span>
                 </div>
                 <ul className="text-[11px] text-muted-foreground space-y-1 list-disc list-inside leading-relaxed">
-                  <li>스크립트가 정확한 위치(아임웹 사용자 정의 코드, &lt;/body&gt; 앞)에 붙어있는지 확인</li>
+                  <li>스크립트가 정확한 위치(공통 헤더 또는 &lt;/body&gt; 앞)에 붙어있는지 확인</li>
+                  {check?.patternsConfigured ? (
+                    <li>패턴 설정됨 — 폼이 있는 페이지 URL이 등록된 패턴과 매칭되는지 확인 (스크립트 탭)</li>
+                  ) : (
+                    <li>패턴 미설정 (모든 페이지에서 동작) — 정상이라면 다른 원인을 확인하세요</li>
+                  )}
                   <li>"성공 트리거 텍스트"가 폼 제출 후 실제로 나타나는 문구와 일치하는지 확인 (필드 설정 탭)</li>
                   <li>허용 Origin이 설정돼있다면 사이트 도메인이 등록돼있는지 확인 (보안/알림 탭)</li>
                   <li>소스가 "활성" 상태인지 확인</li>

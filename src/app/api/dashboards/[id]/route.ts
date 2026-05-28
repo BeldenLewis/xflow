@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { randomBytes } from "node:crypto";
 import { logActivity } from "@/lib/activity";
+import { hashSharePassword } from "@/lib/share-password";
 
 async function authorize(id: string) {
   const supabase = await createClient();
@@ -24,7 +25,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const auth = await authorize(id);
   if ("error" in auth) return auth.error;
-  return NextResponse.json({ dashboard: auth.dashboard });
+  const { dashboard } = auth;
+  return NextResponse.json({
+    dashboard: {
+      ...dashboard,
+      hasSharePassword: !!dashboard.sharePasswordHash,
+      // never expose hash
+      sharePasswordHash: undefined,
+    },
+  });
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -33,7 +42,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if ("error" in auth) return auth.error;
 
   const body = await request.json();
-  const { name, description, shareEnabled } = body;
+  const { name, description, shareEnabled, sharePassword, clearSharePassword } = body;
 
   const data: Record<string, unknown> = {};
   if (name !== undefined) data.name = name;
@@ -45,6 +54,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
   }
 
+  let passwordAction: "set" | "removed" | null = null;
+  if (typeof sharePassword === "string" && sharePassword.length > 0) {
+    if (sharePassword.length > 200) {
+      return NextResponse.json({ error: "비밀번호가 너무 길어요" }, { status: 400 });
+    }
+    data.sharePasswordHash = hashSharePassword(sharePassword);
+    passwordAction = "set";
+  } else if (clearSharePassword === true) {
+    data.sharePasswordHash = null;
+    passwordAction = "removed";
+  }
+
   const updated = await prisma.dashboard.update({ where: { id }, data });
 
   await logActivity({
@@ -54,7 +75,29 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     meta: { dashboardId: id, changes: Object.keys(data) },
   });
 
-  return NextResponse.json({ dashboard: updated });
+  if (passwordAction === "set") {
+    await logActivity({
+      workspaceId: auth.dashboard.workspaceId,
+      userId: auth.userId,
+      action: "dashboard.share_password_set",
+      meta: { dashboardId: id, dashboardName: auth.dashboard.name },
+    });
+  } else if (passwordAction === "removed") {
+    await logActivity({
+      workspaceId: auth.dashboard.workspaceId,
+      userId: auth.userId,
+      action: "dashboard.share_password_removed",
+      meta: { dashboardId: id, dashboardName: auth.dashboard.name },
+    });
+  }
+
+  return NextResponse.json({
+    dashboard: {
+      ...updated,
+      hasSharePassword: !!updated.sharePasswordHash,
+      sharePasswordHash: undefined,
+    },
+  });
 }
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {

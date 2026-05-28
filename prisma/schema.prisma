@@ -107,13 +107,16 @@ model Notification {
 }
 
 model Project {
-  id          String    @id @default(cuid())
-  name        String
-  description String?
-  workspaceId String
-  deletedAt   DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                         String    @id @default(cuid())
+  name                       String
+  description                String?
+  workspaceId                String
+  deletedAt                  DateTime?
+  analyticsShareToken        String?   @unique
+  analyticsShareEnabled      Boolean   @default(false)
+  analyticsSharePasswordHash String?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
 
   workspace            Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   utmLinks             UTMLink[]
@@ -316,8 +319,9 @@ model Dashboard {
   description  String?
   sortOrder    Int      @default(0)
   isDefault    Boolean  @default(false)
-  shareToken   String?  @unique
-  shareEnabled Boolean  @default(false)
+  shareToken        String?  @unique
+  shareEnabled      Boolean  @default(false)
+  sharePasswordHash String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

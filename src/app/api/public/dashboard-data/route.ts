@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { dashboardCache } from "@/lib/cache";
 import { rateLimit } from "@/lib/ratelimit";
 import { createHash } from "node:crypto";
+import { verifySharePassword } from "@/lib/share-password";
 
 // 공유된 보드에서 위젯 데이터 가져오기 (토큰으로 인증)
 // 보안: 토큰이 유효해야만 해당 보드 + 그 보드 projectId 의 데이터만 조회 가능
@@ -10,7 +12,7 @@ import { createHash } from "node:crypto";
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const { token, type, config, from, to, filters } = body;
+  const { token, type, config, from, to, filters, password } = body;
 
   if (!token || typeof token !== "string" || token.length < 32 || !/^[A-Za-z0-9_-]+$/.test(token)) {
     return NextResponse.json({ error: "토큰 형식 오류" }, { status: 401 });
@@ -24,10 +26,20 @@ export async function POST(request: Request) {
 
   const dashboard = await prisma.dashboard.findUnique({
     where: { shareToken: token },
-    select: { id: true, projectId: true, workspaceId: true, shareEnabled: true, widgets: { select: { id: true, type: true, config: true } } },
+    select: { id: true, projectId: true, workspaceId: true, shareEnabled: true, sharePasswordHash: true, widgets: { select: { id: true, type: true, config: true } } },
   });
   if (!dashboard || !dashboard.shareEnabled) {
     return NextResponse.json({ error: "공유가 비활성화됐어요" }, { status: 403 });
+  }
+
+  if (dashboard.sharePasswordHash) {
+    const cookieStore = await cookies();
+    const verifiedCookie = cookieStore.get(`share_password_${token}`)?.value;
+    const passwordOk = verifiedCookie === "verified" ||
+      (typeof password === "string" && verifySharePassword(password, dashboard.sharePasswordHash));
+    if (!passwordOk) {
+      return NextResponse.json({ error: "비밀번호 필요", requiresPassword: true }, { status: 401 });
+    }
   }
 
   // 유효성: 요청한 type/config 가 이 보드 위젯 중 하나여야 함 (보호)

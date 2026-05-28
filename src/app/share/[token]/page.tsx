@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
-import { Loader2, LayoutDashboard } from "lucide-react";
+import { useCallback, useEffect, useState, use } from "react";
+import { Loader2, LayoutDashboard, Lock } from "lucide-react";
 import { formatKstDateTime } from "@/lib/datetime";
 
 interface Widget {
@@ -32,25 +32,41 @@ export default function SharePage({ params }: { params: Promise<{ token: string 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [widgetData, setWidgetData] = useState<Record<string, unknown>>({});
+  const [requiresPassword, setRequiresPassword] = useState(false);
+  const [passwordInput, setPasswordInput] = useState("");
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
+
+  const loadDashboard = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/public/dashboard/${token}`);
+      if (res.status === 401) {
+        const data = await res.json().catch(() => ({}));
+        if (data?.requiresPassword) {
+          setRequiresPassword(true);
+          return;
+        }
+      }
+      const data = await res.json();
+      if (!res.ok) { setError(data.error ?? "공유된 보드를 찾을 수 없어요"); return; }
+      setRequiresPassword(false);
+      setDashboard(data.dashboard);
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch(`/api/public/dashboard/${token}`);
-        const data = await res.json();
-        if (!res.ok) { setError(data.error ?? "공유된 보드를 찾을 수 없어요"); return; }
-        setDashboard(data.dashboard);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [token]);
+    loadDashboard();
+  }, [loadDashboard]);
 
   // 위젯 데이터 fetch
   useEffect(() => {
     if (!dashboard) return;
     const now = new Date();
     const from = new Date(now.getTime() - 30 * 86400_000);
+    const password = sessionStorage.getItem(`share_password_${token}`) ?? undefined;
     dashboard.widgets.forEach(async (w) => {
       const res = await fetch("/api/public/dashboard-data", {
         method: "POST",
@@ -58,6 +74,7 @@ export default function SharePage({ params }: { params: Promise<{ token: string 
         body: JSON.stringify({
           token, type: w.type, config: w.config,
           from: from.toISOString(), to: now.toISOString(),
+          password,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -65,8 +82,62 @@ export default function SharePage({ params }: { params: Promise<{ token: string 
     });
   }, [dashboard, token]);
 
+  const submitPassword = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!passwordInput) return;
+    setVerifying(true);
+    setPasswordError(null);
+    try {
+      const res = await fetch(`/api/public/dashboard/${token}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: passwordInput }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setPasswordError(data.error ?? "비밀번호가 일치하지 않아요");
+        return;
+      }
+      sessionStorage.setItem(`share_password_${token}`, passwordInput);
+      await loadDashboard();
+    } finally {
+      setVerifying(false);
+    }
+  }, [passwordInput, token, loadDashboard]);
+
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>;
+  }
+  if (requiresPassword) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-8">
+        <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-sm">
+          <div className="mb-4 flex items-center gap-2">
+            <Lock className="h-4 w-4 text-muted-foreground" />
+            <h1 className="text-sm font-medium">비밀번호로 보호된 공유 보드</h1>
+          </div>
+          <p className="mb-4 text-xs text-muted-foreground">접근하려면 공유 받은 비밀번호를 입력해주세요.</p>
+          <form onSubmit={submitPassword} className="space-y-3">
+            <input
+              type="password"
+              value={passwordInput}
+              onChange={(e) => setPasswordInput(e.target.value)}
+              placeholder="비밀번호"
+              autoFocus
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-violet-400"
+            />
+            {passwordError && <p className="text-xs text-rose-500">{passwordError}</p>}
+            <button
+              type="submit"
+              disabled={!passwordInput || verifying}
+              className="w-full rounded-xl bg-violet-500 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-600 disabled:opacity-50"
+            >
+              {verifying ? "확인 중…" : "확인"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
   }
   if (error || !dashboard) {
     return (

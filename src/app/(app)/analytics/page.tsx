@@ -17,12 +17,14 @@ import {
   Loader2,
   History,
   RefreshCw,
+  Share2,
   Trash2,
   TrendingDown,
   TrendingUp,
   Upload,
   X,
 } from "lucide-react";
+import { AnalyticsShareModal } from "./AnalyticsShareModal";
 import { toast } from "sonner";
 import {
   Area,
@@ -340,6 +342,7 @@ export default function AnalyticsPage() {
   const [detailSortDir, setDetailSortDir] = useState<"asc" | "desc">("asc");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [previousTotals, setPreviousTotals] = useState<PerformanceResponse["totals"] | null>(null);
   const [previousChartRows, setPreviousChartRows] = useState<Array<{ date: string; cost: number; impressions: number; clicks: number; conversions: number }>>([]);
   const [campaignViewMode, setCampaignViewMode] = useState<"scroll" | "grid">("scroll");
@@ -735,6 +738,16 @@ export default function AnalyticsPage() {
           >
             <History className="h-4 w-4" />
             소스 이력
+          </motion.button>
+          <motion.button
+            onClick={() => setShareOpen(true)}
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.97 }}
+            transition={spring}
+            className="inline-flex h-10 items-center gap-2 rounded-xl border border-border px-3 text-sm transition-colors hover:bg-secondary"
+          >
+            <Share2 className="h-4 w-4" />
+            공유
           </motion.button>
           <motion.button
             onClick={() => setUploadOpen(true)}
@@ -1707,6 +1720,15 @@ export default function AnalyticsPage() {
           />
         )}
       </AnimatePresence>
+
+      {currentProject && (
+        <AnalyticsShareModal
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+          projectId={currentProject.id}
+          projectName={currentProject.name}
+        />
+      )}
     </motion.div>
   );
 }

@@ -28,6 +28,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       apiKey: source.apiKey,
       successTrigger: source.successTrigger,
       redirectUrl: source.redirectUrl,
+      formPagePatterns: source.formPagePatterns,
     },
     fieldMappings: source.fieldMappings.map((f) => ({
       index: f.index,

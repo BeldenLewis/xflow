@@ -17,6 +17,9 @@ export type CollectScriptSource = {
   apiKey: string;
   successTrigger: string;
   redirectUrl: string | null;
+  // 폼 감지가 활성화되는 페이지 경로 패턴 (glob, `*`는 어떤 문자열에도 매칭).
+  // 빈 배열이면 모든 페이지에서 활성화 (기존 동작 유지).
+  formPagePatterns?: string[];
 };
 
 export type BuildCollectScriptsInput = {
@@ -352,10 +355,30 @@ ${utmCore}
   var API_KEY = ${JSON.stringify(source.apiKey)};
   var SUCCESS_TRIGGER = ${JSON.stringify(source.successTrigger)};
   var REDIRECT_URL = ${JSON.stringify(source.redirectUrl ?? "")};
+  // 폼 감지가 활성화될 페이지 경로 패턴 (glob). 빈 배열 = 모든 페이지.
+  var FORM_PAGE_PATTERNS = ${JSON.stringify(source.formPagePatterns ?? [])};
 
   var FIELD_MAP = [
 ${fieldMap}
   ];
+
+  // glob 매칭: \`*\` 는 어떤 문자열에도 매칭. 정규식 메타문자는 이스케이프.
+  function pathMatchesPattern(pathname, pattern) {
+    var escaped = pattern.replace(/[.+?^\${}()|[\\]\\\\]/g, "\\\\$&").replace(/\\*/g, ".*");
+    try {
+      return new RegExp("^" + escaped + "$").test(pathname);
+    } catch (e) { return false; }
+  }
+
+  function isFormPage() {
+    // 빈 배열 = 모든 페이지에서 폼 감지 활성화 (기존 동작 유지).
+    if (!FORM_PAGE_PATTERNS || FORM_PAGE_PATTERNS.length === 0) return true;
+    var path = window.location.pathname || "/";
+    for (var i = 0; i < FORM_PAGE_PATTERNS.length; i++) {
+      if (pathMatchesPattern(path, FORM_PAGE_PATTERNS[i])) return true;
+    }
+    return false;
+  }
 
   // ── UTM 어트리뷰션 (first-touch + last-touch + multi-touch journey) ──
 ${utmCore}
@@ -465,42 +488,45 @@ ${utmCore}
     }).catch(function() {});
   }
 
-  var triggered = false;
-  var pendingData = null;
+  // ── 폼 감지 — 패턴에 매칭된 페이지에서만 활성화. UTM 캡처는 위에서 이미 모든 페이지에 대해 실행됨.
+  if (isFormPage()) {
+    var triggered = false;
+    var pendingData = null;
 
-  document.addEventListener("click", function(e) {
-    if (triggered) return;
-    var target = e.target;
-    var btn = target.closest
-      ? target.closest("button, input[type='submit'], a")
-      : null;
-    if (!btn) return;
-    var text = (btn.innerText || btn.value || "").trim();
-    var isSubmit = btn.type === "submit" || text === "확인" || text === "OK"
-      || text === "접수" || text === "제출" || text === "신청";
-    if (isSubmit) {
-      pendingData = collectData();
-    }
-  }, true);
+    document.addEventListener("click", function(e) {
+      if (triggered) return;
+      var target = e.target;
+      var btn = target.closest
+        ? target.closest("button, input[type='submit'], a")
+        : null;
+      if (!btn) return;
+      var text = (btn.innerText || btn.value || "").trim();
+      var isSubmit = btn.type === "submit" || text === "확인" || text === "OK"
+        || text === "접수" || text === "제출" || text === "신청";
+      if (isSubmit) {
+        pendingData = collectData();
+      }
+    }, true);
 
-  function fire() {
-    if (triggered) return;
-    triggered = true;
-    sendData(pendingData || collectData());
-    if (REDIRECT_URL) {
-      setTimeout(function() { window.location.href = REDIRECT_URL; }, 1000);
-    }
+    var fire = function() {
+      if (triggered) return;
+      triggered = true;
+      sendData(pendingData || collectData());
+      if (REDIRECT_URL) {
+        setTimeout(function() { window.location.href = REDIRECT_URL; }, 1000);
+      }
+    };
+
+    var observer = new MutationObserver(function() {
+      if (triggered) return;
+      var bodyText = document.body.innerText || document.body.textContent || "";
+      if (bodyText.indexOf(SUCCESS_TRIGGER) !== -1) {
+        fire();
+      }
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
   }
-
-  var observer = new MutationObserver(function() {
-    if (triggered) return;
-    var bodyText = document.body.innerText || document.body.textContent || "";
-    if (bodyText.indexOf(SUCCESS_TRIGGER) !== -1) {
-      fire();
-    }
-  });
-
-  observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
 })();`;
 
   return { script, utmScript };

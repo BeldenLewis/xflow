@@ -60,7 +60,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const body = await request.json();
   const {
     name, description, siteUrl, successTrigger, redirectUrl, isActive,
-    webhookUrl, notifyOnSubmit, allowedOrigins,
+    webhookUrl, notifyOnSubmit, allowedOrigins, formPagePatterns,
   } = body;
 
   let normalizedAllowed: string[] | undefined;
@@ -70,6 +70,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       .filter((o): o is string => !!o);
     // 중복 제거
     normalizedAllowed = Array.from(new Set(normalizedAllowed));
+  }
+
+  // formPagePatterns: 빈 배열도 valid (= "모든 페이지" 의미).
+  // 각 항목은 trim + 200자 제한, 최대 20개.
+  let normalizedFormPagePatterns: string[] | undefined;
+  if (Array.isArray(formPagePatterns)) {
+    normalizedFormPagePatterns = formPagePatterns
+      .filter((p): p is string => typeof p === "string")
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0 && p.length <= 200);
+    normalizedFormPagePatterns = Array.from(new Set(normalizedFormPagePatterns)).slice(0, 20);
   }
 
   const source = await prisma.collectSource.update({
@@ -84,6 +95,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       ...(webhookUrl !== undefined && { webhookUrl: webhookUrl || null }),
       ...(notifyOnSubmit !== undefined && { notifyOnSubmit: !!notifyOnSubmit }),
       ...(normalizedAllowed !== undefined && { allowedOrigins: normalizedAllowed }),
+      ...(normalizedFormPagePatterns !== undefined && { formPagePatterns: normalizedFormPagePatterns }),
     },
     include: { fieldMappings: { orderBy: { sortOrder: "asc" } } },
   });

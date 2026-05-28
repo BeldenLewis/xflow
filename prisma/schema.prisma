@@ -234,6 +234,7 @@ model CollectSource {
   webhookUrl       String?
   notifyOnSubmit   Boolean   @default(false)
   allowedOrigins   String[]  @default([])
+  formPagePatterns String[]  @default([])
   deletedAt        DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt

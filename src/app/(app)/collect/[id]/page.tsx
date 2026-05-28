@@ -10,7 +10,7 @@ import {
   Download, Upload, ArrowUp, ArrowDown, ChevronsUpDown, Wand2,
   ChevronLeft, ChevronRight, Search, Filter, Activity, Shield,
   RefreshCcw, Bell, Webhook, KeyRound, Eraser, AlertTriangle, ShieldAlert,
-  MoreHorizontal, Link2, Wrench, HardDriveDownload, Columns3,
+  MoreHorizontal, Link2, Wrench, HardDriveDownload, Columns3, MapPin, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -67,6 +67,7 @@ interface CollectSource {
   webhookUrl: string | null;
   notifyOnSubmit: boolean;
   allowedOrigins: string[];
+  formPagePatterns: string[];
   fieldMappings: FieldMapping[];
   discoveredFields: DiscoveredField[] | null;
   _count: { records: number };
@@ -193,6 +194,10 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
   const [settingsWebhookUrl, setSettingsWebhookUrl] = useState("");
   const [settingsNotifyOnSubmit, setSettingsNotifyOnSubmit] = useState(false);
   const [settingsAllowedOrigins, setSettingsAllowedOrigins] = useState("");
+  // 폼 페이지 패턴 (글로브). 빈 배열 = 모든 페이지에서 폼 감지 활성화.
+  const [formPagePatterns, setFormPagePatterns] = useState<string[]>([]);
+  const [formPagePatternInput, setFormPagePatternInput] = useState("");
+  const [savingFormPagePatterns, setSavingFormPagePatterns] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [regeneratingKey, setRegeneratingKey] = useState(false);
 
@@ -226,6 +231,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
       setSettingsWebhookUrl(data.source.webhookUrl ?? "");
       setSettingsNotifyOnSubmit(!!data.source.notifyOnSubmit);
       setSettingsAllowedOrigins((data.source.allowedOrigins ?? []).join("\n"));
+      setFormPagePatterns(Array.isArray(data.source.formPagePatterns) ? data.source.formPagePatterns : []);
     } finally {
       setIsLoading(false);
     }
@@ -586,6 +592,45 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
     if (!res.ok) { toast.error("저장 실패"); return; }
     toast.success("설정이 저장됐어요");
     setSource((s) => s ? { ...s, successTrigger, redirectUrl: redirectUrl || null } : s);
+  };
+
+  const addFormPagePattern = () => {
+    const v = formPagePatternInput.trim();
+    if (!v) return;
+    if (v.length > 200) { toast.error("패턴은 200자 이내로 입력해주세요"); return; }
+    if (formPagePatterns.includes(v)) { setFormPagePatternInput(""); return; }
+    if (formPagePatterns.length >= 20) { toast.error("패턴은 최대 20개까지 등록할 수 있어요"); return; }
+    setFormPagePatterns((prev) => [...prev, v]);
+    setFormPagePatternInput("");
+  };
+
+  const removeFormPagePattern = (pattern: string) => {
+    setFormPagePatterns((prev) => prev.filter((p) => p !== pattern));
+  };
+
+  const handleSaveFormPagePatterns = async () => {
+    setSavingFormPagePatterns(true);
+    try {
+      // 인풋에 남아 있는 미확정 패턴이 있다면 함께 저장
+      const pending = formPagePatternInput.trim();
+      const next = pending && !formPagePatterns.includes(pending)
+        ? [...formPagePatterns, pending].slice(0, 20)
+        : formPagePatterns;
+      const res = await fetch(`/api/collect-sources/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ formPagePatterns: next }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "저장 실패"); return; }
+      const saved = Array.isArray(data.source?.formPagePatterns) ? data.source.formPagePatterns : next;
+      setFormPagePatterns(saved);
+      setFormPagePatternInput("");
+      setSource((s) => s ? { ...s, formPagePatterns: saved } : s);
+      toast.success("폼 페이지 패턴 저장됨. 5분 내 사이트에 적용돼요");
+    } finally {
+      setSavingFormPagePatterns(false);
+    }
   };
 
   const handleToggleSilent = async (next: boolean) => {
@@ -1296,7 +1341,9 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                         <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-violet-500 text-white">NEW</span>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                        사이트 공통 헤더에 한 번만 붙여넣으면 됩니다. 필드/리다이렉트 수정도 자동 반영돼요.
+                        사이트 공통 헤더에 1줄 설치. 필드/리다이렉트 수정도 자동 반영돼요.
+                        <br />
+                        <span className="text-foreground/80">아래에서 폼 페이지를 지정하면 그 페이지에서만 폼 감지가 작동</span>해 false positive를 방지해요.
                       </p>
                     </div>
                     <CopyCodeButton text={`<script async src="${browserOrigin}/s/${id}"></script>`} />
@@ -1311,6 +1358,98 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                   </ul>
                 </div>
               )}
+
+              {/* 폼 페이지 지정 — 패턴에 매칭된 페이지에서만 폼 감지가 작동. 빈 배열이면 모든 페이지. */}
+              <div className="rounded-2xl border border-border bg-background p-5 space-y-4">
+                <div className="flex items-start gap-3">
+                  <MapPin className="w-4 h-4 text-violet-500 shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">폼 페이지 지정 <span className="text-xs font-normal text-muted-foreground">(선택)</span></p>
+                    <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                      등록 폼이 있는 페이지의 URL 경로만 입력하세요. 비워두면 모든 페이지에서 폼 감지가 작동해요.
+                      <br />
+                      <span className="text-foreground/70">UTM 캡처는 패턴과 상관없이 모든 페이지에서 계속 동작합니다.</span>
+                    </p>
+                  </div>
+                </div>
+
+                {formPagePatterns.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    <AnimatePresence initial={false}>
+                      {formPagePatterns.map((pattern) => (
+                        <motion.span
+                          key={pattern}
+                          layout
+                          initial={{ opacity: 0, scale: 0.9 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.9 }}
+                          transition={spring}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet-500/10 border border-violet-400/40 text-xs font-mono text-violet-700 dark:text-violet-300"
+                        >
+                          {pattern}
+                          <button
+                            type="button"
+                            onClick={() => removeFormPagePattern(pattern)}
+                            aria-label={`${pattern} 제거`}
+                            className="hover:text-violet-900 dark:hover:text-violet-100 transition-colors"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </motion.span>
+                      ))}
+                    </AnimatePresence>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={formPagePatternInput}
+                    onChange={(e) => setFormPagePatternInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addFormPagePattern();
+                      }
+                    }}
+                    placeholder="/event/register, /2026/* 등 — Enter로 추가"
+                    className="flex-1 px-3 py-2 rounded-xl border border-border bg-background text-sm font-mono focus:outline-none focus:border-violet-400"
+                  />
+                  <motion.button
+                    type="button"
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.96 }}
+                    transition={spring}
+                    onClick={addFormPagePattern}
+                    disabled={!formPagePatternInput.trim()}
+                    className="flex items-center gap-1 px-3 py-2 rounded-xl border border-border text-xs font-medium hover:border-violet-400 hover:text-violet-500 transition-colors disabled:opacity-40"
+                  >
+                    <Plus className="w-3.5 h-3.5" />추가
+                  </motion.button>
+                </div>
+
+                <div className="text-[11px] text-muted-foreground leading-relaxed bg-secondary/50 rounded-xl px-3 py-2 space-y-0.5">
+                  <p className="font-medium text-foreground/80">예시</p>
+                  <p>· <span className="font-mono">/event/register</span> — 정확한 경로</p>
+                  <p>· <span className="font-mono">/event/*/register</span> — 와일드카드</p>
+                  <p>· <span className="font-mono">/2026/*</span> — 하위 모든 경로</p>
+                </div>
+
+                <div className="flex justify-end">
+                  <motion.button
+                    type="button"
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.96 }}
+                    transition={spring}
+                    onClick={() => void handleSaveFormPagePatterns()}
+                    disabled={savingFormPagePatterns}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
+                  >
+                    {savingFormPagePatterns ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    저장
+                  </motion.button>
+                </div>
+              </div>
 
               {/* B: 콘솔 스니퍼 */}
               <div className="p-4 rounded-2xl border border-border">

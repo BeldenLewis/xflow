@@ -1,0 +1,1 @@
+ALTER TABLE "CollectSource" ADD COLUMN IF NOT EXISTS "formPagePatterns" TEXT[] NOT NULL DEFAULT '{}';

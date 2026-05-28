@@ -491,6 +491,7 @@ function UtmTrendChart({ trend }: { trend: RealtimeReportData["dailyUtmTrend"] }
             <Tooltip
               formatter={(value, name) => [`${formatNumber(Number(value))}건`, String(name)]}
               labelFormatter={(label) => String(label)}
+              itemSorter={(item) => -Number(item.value ?? 0)}
               contentStyle={{
                 backgroundColor: "hsl(var(--card))",
                 border: "1px solid hsl(var(--border))",

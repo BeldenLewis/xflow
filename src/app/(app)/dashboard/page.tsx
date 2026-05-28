@@ -1,12 +1,7 @@
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+// proxy.ts에서 이미 미인증 사용자는 /로 리다이렉트하므로
+// 여기서 추가 auth 체크는 불필요. RSC + 쿠키 동기화 race condition 회피.
 import DashboardClient from "./DashboardClient";
 
-export default async function DashboardPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/");
+export default function DashboardPage() {
   return <DashboardClient />;
 }

@@ -46,7 +46,9 @@ export default function LoginPage() {
       setIsLoading(false);
       return;
     }
-    router.push("/dashboard");
+    // Full page reload — 쿠키를 서버 컴포넌트와 동기화하기 위해 필요.
+    // router.push로 soft navigation 하면 RSC가 새 쿠키를 못 읽고 / 로 다시 리다이렉트할 수 있음.
+    window.location.href = "/dashboard";
   };
 
   const handleGoogleSignIn = async () => {

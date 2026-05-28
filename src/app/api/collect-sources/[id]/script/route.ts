@@ -112,27 +112,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     return storageGet(UTM_LAST_KEY) || storageGet(UTM_FIRST_KEY) || emptyUtm();
   }
 
-  function sameSiteHost(a, b) {
-    return String(a || "").replace(/^www\\./, "") === String(b || "").replace(/^www\\./, "");
-  }
-
-  function appendUtmToLink(anchor) {
-    var utm = getStoredUtm();
-    if (!utm.utmSource && !utm.utmMedium && !utm.utmCampaign && !utm.utmTerm && !utm.utmContent) return;
-    try {
-      var url = new URL(anchor.getAttribute("href"), window.location.href);
-      if (!/^https?:$/.test(url.protocol)) return;
-      if (!sameSiteHost(url.hostname, window.location.hostname)) return;
-      var params = url.searchParams;
-      if (!params.get("utm_source") && utm.utmSource) params.set("utm_source", utm.utmSource);
-      if (!params.get("utm_medium") && utm.utmMedium) params.set("utm_medium", utm.utmMedium);
-      if (!params.get("utm_campaign") && utm.utmCampaign) params.set("utm_campaign", utm.utmCampaign);
-      if (!params.get("utm_term") && utm.utmTerm) params.set("utm_term", utm.utmTerm);
-      if (!params.get("utm_content") && utm.utmContent) params.set("utm_content", utm.utmContent);
-      anchor.href = url.toString();
-    } catch(e) {}
-  }
-
   function captureUtm() {
     var urlUtm = readUrlUtm();
     if (!urlUtm) return;
@@ -143,11 +122,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   migrateLegacyUtm();
   captureUtm();
 
-  document.addEventListener("click", function(e) {
-    var target = e.target;
-    var anchor = target && target.closest ? target.closest("a[href]") : null;
-    if (anchor) appendUtmToLink(anchor);
-  }, true);
+  // 주의: 페이지 내부 링크에 UTM을 자동으로 덧붙이는 동작은 제거했어요.
+  // 저장된 UTM은 form submission 시 localStorage에서 읽어 attribution에만 사용.
+  // URL은 사용자가 처음 진입한 그대로 유지 — 옛 출처가 주소창에 남는 혼란 방지.
 
   window.MachUtm = window.MachUtm || {};
   window.MachUtm.capture = captureUtm;

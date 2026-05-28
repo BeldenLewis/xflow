@@ -108,18 +108,20 @@ export async function POST(request: Request) {
 
   const {
     data, _fieldMeta,
-    utmSource, utmMedium, utmCampaign, utmTerm, utmContent,
-    firstUtmSource, firstUtmMedium, firstUtmCampaign, firstUtmTerm, firstUtmContent,
+    utmSource, utmMedium, utmCampaign, utmTerm, utmContent, utmId,
+    firstUtmSource, firstUtmMedium, firstUtmCampaign, firstUtmTerm, firstUtmContent, firstUtmId,
     firstReferrer, firstSeenAt,
+    journey,
     referrer, userAgent,
   } = body as {
     data: Record<string, string>;
     _fieldMeta?: Array<{ index: number; label: string; type: string }>;
     utmSource?: string; utmMedium?: string; utmCampaign?: string;
-    utmTerm?: string; utmContent?: string;
+    utmTerm?: string; utmContent?: string; utmId?: string;
     firstUtmSource?: string; firstUtmMedium?: string; firstUtmCampaign?: string;
-    firstUtmTerm?: string; firstUtmContent?: string;
+    firstUtmTerm?: string; firstUtmContent?: string; firstUtmId?: string;
     firstReferrer?: string; firstSeenAt?: string;
+    journey?: unknown;
     referrer?: string; userAgent?: string;
   };
 
@@ -133,6 +135,32 @@ export async function POST(request: Request) {
     return isNaN(d.getTime()) ? null : d;
   };
 
+  // journey 검증: 배열이어야 하고, 각 touchpoint 는 plain object. 최대 20개.
+  // 형태가 잘못된 항목은 drop. 전체가 array 가 아니면 null.
+  type JourneyTouch = {
+    utmSource: string; utmMedium: string; utmCampaign: string;
+    utmId: string; referrer: string; seenAt: string;
+  };
+  const sanitizeJourney = (j: unknown): JourneyTouch[] | null => {
+    if (!Array.isArray(j)) return null;
+    const out: JourneyTouch[] = [];
+    for (const item of j) {
+      if (!item || typeof item !== "object") continue;
+      const it = item as Record<string, unknown>;
+      out.push({
+        utmSource:   typeof it.utmSource   === "string" ? it.utmSource   : "",
+        utmMedium:   typeof it.utmMedium   === "string" ? it.utmMedium   : "",
+        utmCampaign: typeof it.utmCampaign === "string" ? it.utmCampaign : "",
+        utmId:       typeof it.utmId       === "string" ? it.utmId       : "",
+        referrer:    typeof it.referrer    === "string" ? it.referrer    : "",
+        seenAt:      typeof it.seenAt      === "string" ? it.seenAt      : "",
+      });
+      if (out.length >= 20) break;
+    }
+    return out.length > 0 ? out : null;
+  };
+  const cleanJourney = sanitizeJourney(journey);
+
   const recordData = {
     sourceId: source.id,
     projectId: source.projectId,
@@ -143,13 +171,16 @@ export async function POST(request: Request) {
     utmCampaign: utmCampaign ?? null,
     utmTerm: utmTerm ?? null,
     utmContent: utmContent ?? null,
+    utmId: utmId ?? null,
     firstUtmSource:   firstUtmSource   ?? null,
     firstUtmMedium:   firstUtmMedium   ?? null,
     firstUtmCampaign: firstUtmCampaign ?? null,
     firstUtmTerm:     firstUtmTerm     ?? null,
     firstUtmContent:  firstUtmContent  ?? null,
+    firstUtmId:       firstUtmId       ?? null,
     firstReferrer:    firstReferrer    ?? null,
     firstSeenAt:      parseDate(firstSeenAt),
+    journey:          (cleanJourney ?? null) as never,
     referrer: referrer ?? null,
     userAgent: userAgent ?? null,
     ip: ip === "unknown" ? null : ip,

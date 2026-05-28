@@ -26,15 +26,68 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     .map((f) => `    { index: ${f.index}, key: ${JSON.stringify(f.key)}, label: ${JSON.stringify(f.label)} }`)
     .join(",\n");
 
-  const utmScript = `(function() {
+  // ── 공통 UTM/어트리뷰션 라이브러리 본문 ─────────────────────────
+  // utmScript / script 양쪽에 동일하게 주입.
+  // iOS Safari ITP: localStorage가 7일 후 만료될 수 있음. 서버측 first-party cookie 도입 시까지 제약.
+  const utmCore = `  /* iOS Safari ITP: localStorage가 7일 후 만료될 수 있음. 서버측 first-party cookie 도입 시까지 제약. */
   var UTM_LAST_KEY  = "mach_utm";
   var UTM_FIRST_KEY = "mach_utm_first";
+  var SESSION_KEY   = "mach_session";
+  var JOURNEY_KEY   = "mach_utm_journey";
   var LEGACY_UTM_LAST_KEY  = "x" + "flow_utm";
   var LEGACY_UTM_FIRST_KEY = "x" + "flow_utm_first";
-  var UTM_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-  var UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"];
+  var UTM_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30일
+  var SESSION_TIMEOUT_MS = 30 * 60 * 1000;   // 30분
+  var JOURNEY_MAX = 20;
+  var UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id"];
 
-  function emptyUtm() { return { utmSource:"", utmMedium:"", utmCampaign:"", utmTerm:"", utmContent:"", referrer:"", seenAt:"" }; }
+  // 클릭 ID → source/medium 매핑 (UTM 없을 때 derive)
+  var CLICK_ID_MAP = {
+    gclid:     { source: "google",      medium: "cpc" },
+    fbclid:    { source: "facebook",    medium: "paid_social" },
+    msclkid:   { source: "bing",        medium: "cpc" },
+    yclid:     { source: "yandex",      medium: "cpc" },
+    dclid:     { source: "doubleclick", medium: "display" },
+    li_fat_id: { source: "linkedin",    medium: "paid_social" }
+  };
+
+  var REFERRER_MAP = {
+    "google.com":      ["google",    "organic"],
+    "naver.com":       ["naver",     "organic"],
+    "daum.net":        ["daum",      "organic"],
+    "bing.com":        ["bing",      "organic"],
+    "yahoo.com":       ["yahoo",     "organic"],
+    "duckduckgo.com":  ["duckduckgo","organic"],
+    "facebook.com":    ["facebook",  "social"],
+    "instagram.com":   ["instagram", "social"],
+    "twitter.com":     ["twitter",   "social"],
+    "x.com":           ["twitter",   "social"],
+    "youtube.com":     ["youtube",   "social"],
+    "linkedin.com":    ["linkedin",  "social"],
+    "kakao.com":       ["kakao",     "social"],
+    "tistory.com":     ["tistory",   "referral"],
+    "brunch.co.kr":    ["brunch",    "referral"]
+  };
+
+  function emptyUtm() { return { utmSource:"", utmMedium:"", utmCampaign:"", utmTerm:"", utmContent:"", utmId:"", referrer:"", seenAt:"" }; }
+
+  function isBot() {
+    var ua = navigator.userAgent || "";
+    return /bot|crawl|spider|slurp|googlebot|bingbot|facebookexternalhit|whatsapp|telegram|twitterbot|linkedinbot/i.test(ua);
+  }
+
+  function isKakaoInApp() { return /KAKAOTALK/i.test(navigator.userAgent || ""); }
+
+  function getCookieDomain() {
+    var host = location.hostname;
+    if (!host || /^[0-9.]+$/.test(host) || host === "localhost") return null;
+    var parts = host.split(".");
+    if (parts.length < 2) return null;
+    if (parts.length >= 3 && (parts[parts.length - 2] === "co" || parts[parts.length - 2] === "ne" || parts[parts.length - 2] === "or")) {
+      return "." + parts.slice(-3).join(".");
+    }
+    return "." + parts.slice(-2).join(".");
+  }
 
   function storageGet(key) {
     try {
@@ -68,7 +121,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     try { sessionStorage.setItem(key, payload); } catch(e) {}
     try {
       var maxAge = Math.floor(ttlMs / 1000);
-      document.cookie = key + "=" + encodeURIComponent(JSON.stringify(value)) + ";path=/;max-age=" + maxAge + ";SameSite=Lax";
+      var cookieStr = key + "=" + encodeURIComponent(JSON.stringify(value)) + ";path=/;max-age=" + maxAge + ";SameSite=Lax";
+      var dom = getCookieDomain();
+      if (dom) cookieStr += ";domain=" + dom;
+      document.cookie = cookieStr;
     } catch(e) {}
   }
 
@@ -94,41 +150,183 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     return false;
   }
 
+  function findClickId(params) {
+    for (var k in CLICK_ID_MAP) {
+      var v = params.get(k) || params.get(k.toLowerCase());
+      if (v) return { id: v, source: CLICK_ID_MAP[k].source, medium: CLICK_ID_MAP[k].medium, key: k };
+    }
+    return null;
+  }
+
+  // utmSource/utmMedium 은 lowercase+trim, 나머지는 trim 만
+  function normalizeUtm(u) {
+    var lcTrim = function(s) { return (s || "").toString().trim().toLowerCase(); };
+    var tr = function(s) { return (s || "").toString().trim(); };
+    return {
+      utmSource:   lcTrim(u.utmSource),
+      utmMedium:   lcTrim(u.utmMedium),
+      utmCampaign: tr(u.utmCampaign),
+      utmTerm:     tr(u.utmTerm),
+      utmContent:  tr(u.utmContent),
+      utmId:       tr(u.utmId),
+      referrer:    u.referrer || "",
+      seenAt:      u.seenAt || new Date().toISOString()
+    };
+  }
+
   function readUrlUtm() {
     var params = new URLSearchParams(window.location.search);
-    if (!hasAnyUtm(params)) return null;
-    return {
+    var hasUtm = hasAnyUtm(params);
+    var click = findClickId(params);
+    if (!hasUtm && !click) return null;
+    var base = {
       utmSource:   param(params, "utm_source"),
       utmMedium:   param(params, "utm_medium"),
       utmCampaign: param(params, "utm_campaign"),
       utmTerm:     param(params, "utm_term"),
       utmContent:  param(params, "utm_content"),
+      utmId:       param(params, "utm_id"),
       referrer:    document.referrer || "",
       seenAt:      new Date().toISOString()
     };
+    // 클릭 ID 있고 utm_source/medium 비어있으면 derive
+    if (click) {
+      if (!base.utmSource) base.utmSource = click.source;
+      if (!base.utmMedium) base.utmMedium = click.medium;
+      if (!base.utmId)     base.utmId    = click.id;
+    }
+    return normalizeUtm(base);
   }
 
-  function getStoredUtm() {
-    return storageGet(UTM_LAST_KEY) || storageGet(UTM_FIRST_KEY) || emptyUtm();
+  function inferFromReferrer() {
+    var ref = document.referrer;
+    if (!ref) return null;
+    try {
+      var u = new URL(ref);
+      var host = u.hostname.replace(/^www\\./, "").toLowerCase();
+      if (u.hostname === location.hostname) return null;
+      var matched = null;
+      for (var k in REFERRER_MAP) {
+        if (host === k || host.endsWith("." + k)) { matched = REFERRER_MAP[k]; break; }
+      }
+      if (matched) {
+        return normalizeUtm({
+          utmSource: matched[0], utmMedium: matched[1],
+          utmCampaign: "", utmTerm: "", utmContent: "", utmId: "",
+          referrer: ref, seenAt: new Date().toISOString()
+        });
+      }
+      return normalizeUtm({
+        utmSource: host, utmMedium: "referral",
+        utmCampaign: "", utmTerm: "", utmContent: "", utmId: "",
+        referrer: ref, seenAt: new Date().toISOString()
+      });
+    } catch(e) { return null; }
+  }
+
+  function inferDirect() {
+    return normalizeUtm({
+      utmSource: "(direct)", utmMedium: "(none)",
+      utmCampaign: "", utmTerm: "", utmContent: "", utmId: "",
+      referrer: "", seenAt: new Date().toISOString()
+    });
+  }
+
+  // 30분 세션 — lastActivity 기준
+  function getSession() {
+    var s = storageGet(SESSION_KEY);
+    if (s && s.lastActivity && (Date.now() - s.lastActivity) < SESSION_TIMEOUT_MS) return s;
+    return null;
+  }
+  function updateSessionActivity() {
+    storageSet(SESSION_KEY, { lastActivity: Date.now() }, UTM_TTL_MS);
+  }
+
+  function appendToJourney(utm) {
+    var journey = storageGet(JOURNEY_KEY) || [];
+    if (!Array.isArray(journey)) journey = [];
+    var last = journey[journey.length - 1];
+    if (last && last.utmSource === utm.utmSource && last.utmMedium === utm.utmMedium && last.utmCampaign === utm.utmCampaign) return;
+    journey.push({
+      utmSource: utm.utmSource, utmMedium: utm.utmMedium, utmCampaign: utm.utmCampaign,
+      utmId: utm.utmId || "", referrer: utm.referrer || "", seenAt: utm.seenAt
+    });
+    if (journey.length > JOURNEY_MAX) journey = journey.slice(-JOURNEY_MAX);
+    storageSet(JOURNEY_KEY, journey, UTM_TTL_MS);
   }
 
   function captureUtm() {
-    var urlUtm = readUrlUtm();
-    if (!urlUtm) return;
-    storageSet(UTM_LAST_KEY, urlUtm, UTM_TTL_MS);
-    if (!storageGet(UTM_FIRST_KEY)) storageSet(UTM_FIRST_KEY, urlUtm, UTM_TTL_MS);
-  }
+    if (isBot()) return;
 
+    var urlUtm = readUrlUtm();
+    var existingSession = getSession();
+
+    if (urlUtm) {
+      // URL에 UTM/clickID 있음 → last 갱신, first 미설정 시 first도 설정, journey 추가
+      storageSet(UTM_LAST_KEY, urlUtm, UTM_TTL_MS);
+      if (!storageGet(UTM_FIRST_KEY)) storageSet(UTM_FIRST_KEY, urlUtm, UTM_TTL_MS);
+      appendToJourney(urlUtm);
+      updateSessionActivity();
+      return;
+    }
+
+    if (existingSession) {
+      // 세션 계속 (30분 이내) — last 변경하지 않음, journey 추가하지 않음
+      updateSessionActivity();
+      return;
+    }
+
+    // 새 세션 시작, URL UTM 없음 → referrer / kakao / direct 순서로 추론
+    var refUtm = inferFromReferrer();
+    if (refUtm) {
+      storageSet(UTM_LAST_KEY, refUtm, UTM_TTL_MS);
+      if (!storageGet(UTM_FIRST_KEY)) storageSet(UTM_FIRST_KEY, refUtm, UTM_TTL_MS);
+      appendToJourney(refUtm);
+      updateSessionActivity();
+      return;
+    }
+
+    if (isKakaoInApp()) {
+      var kakaoUtm = normalizeUtm({
+        utmSource: "kakao", utmMedium: "messenger",
+        utmCampaign: "", utmTerm: "", utmContent: "", utmId: "",
+        referrer: "", seenAt: new Date().toISOString()
+      });
+      storageSet(UTM_LAST_KEY, kakaoUtm, UTM_TTL_MS);
+      if (!storageGet(UTM_FIRST_KEY)) storageSet(UTM_FIRST_KEY, kakaoUtm, UTM_TTL_MS);
+      appendToJourney(kakaoUtm);
+      updateSessionActivity();
+      return;
+    }
+
+    // 완전 다이렉트 — first 가 아직 없을 때만 (direct) 로 마킹
+    if (!storageGet(UTM_FIRST_KEY)) {
+      var directUtm = inferDirect();
+      storageSet(UTM_LAST_KEY, directUtm, UTM_TTL_MS);
+      storageSet(UTM_FIRST_KEY, directUtm, UTM_TTL_MS);
+      appendToJourney(directUtm);
+    }
+    updateSessionActivity();
+  }
+`;
+
+  const utmScript = `(function() {
+${utmCore}
   migrateLegacyUtm();
   captureUtm();
 
   // 주의: 페이지 내부 링크에 UTM을 자동으로 덧붙이는 동작은 제거했어요.
   // 저장된 UTM은 form submission 시 localStorage에서 읽어 attribution에만 사용.
-  // URL은 사용자가 처음 진입한 그대로 유지 — 옛 출처가 주소창에 남는 혼란 방지.
 
   window.MachUtm = window.MachUtm || {};
   window.MachUtm.capture = captureUtm;
-  window.MachUtm.get = function() { return { last: storageGet(UTM_LAST_KEY) || emptyUtm(), first: storageGet(UTM_FIRST_KEY) || emptyUtm() }; };
+  window.MachUtm.get = function() {
+    return {
+      last: storageGet(UTM_LAST_KEY) || emptyUtm(),
+      first: storageGet(UTM_FIRST_KEY) || emptyUtm(),
+      journey: storageGet(JOURNEY_KEY) || []
+    };
+  };
 })();`;
 
   const script = `(function() {
@@ -141,153 +339,22 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 ${fieldMap}
   ];
 
-  // ── UTM 어트리뷰션 (first-touch + last-touch, 다중 저장소 폴백, referrer 추론) ──
-  var UTM_LAST_KEY  = "mach_utm";        // 최근 유입 (덮어씀)
-  var UTM_FIRST_KEY = "mach_utm_first";  // 최초 유입 (한번 설정되면 유지)
-  var LEGACY_UTM_LAST_KEY  = "x" + "flow_utm";
-  var LEGACY_UTM_FIRST_KEY = "x" + "flow_utm_first";
-  var UTM_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30일
+  // ── UTM 어트리뷰션 (first-touch + last-touch + multi-touch journey) ──
+${utmCore}
 
-  var REFERRER_MAP = {
-    "google.com":      ["google",    "organic"],
-    "naver.com":       ["naver",     "organic"],
-    "daum.net":        ["daum",      "organic"],
-    "bing.com":        ["bing",      "organic"],
-    "yahoo.com":       ["yahoo",     "organic"],
-    "duckduckgo.com":  ["duckduckgo","organic"],
-    "facebook.com":    ["facebook",  "social"],
-    "instagram.com":   ["instagram", "social"],
-    "twitter.com":     ["twitter",   "social"],
-    "x.com":           ["twitter",   "social"],
-    "youtube.com":     ["youtube",   "social"],
-    "linkedin.com":    ["linkedin",  "social"],
-    "kakao.com":       ["kakao",     "social"],
-    "tistory.com":     ["tistory",   "referral"],
-    "brunch.co.kr":    ["brunch",    "referral"]
-  };
-
-  function emptyUtm() { return { utmSource:"", utmMedium:"", utmCampaign:"", utmTerm:"", utmContent:"", referrer:"", seenAt:"" }; }
-
-  function storageGet(key) {
-    // localStorage → sessionStorage → cookie 순서로 읽기
-    try {
-      var raw = localStorage.getItem(key);
-      if (raw) {
-        var parsed = JSON.parse(raw);
-        if (parsed && parsed._exp && parsed._exp > Date.now()) return parsed.v;
-        if (parsed && !parsed._exp) return parsed; // legacy
-      }
-    } catch(e) {}
-    try {
-      var raw2 = sessionStorage.getItem(key);
-      if (raw2) {
-        var p2 = JSON.parse(raw2);
-        return (p2 && p2.v) ? p2.v : p2;
-      }
-    } catch(e) {}
-    try {
-      var cookies = document.cookie ? document.cookie.split(";") : [];
-      for (var i = 0; i < cookies.length; i++) {
-        var c = cookies[i].replace(/^\\s+/, "");
-        if (c.indexOf(key + "=") === 0) {
-          return JSON.parse(decodeURIComponent(c.substring(key.length + 1)));
-        }
-      }
-    } catch(e) {}
-    return null;
-  }
-
-  function storageSet(key, value, ttlMs) {
-    var payload = JSON.stringify({ v: value, _exp: Date.now() + ttlMs });
-    try { localStorage.setItem(key, payload); } catch(e) {}
-    try { sessionStorage.setItem(key, payload); } catch(e) {}
-    try {
-      var maxAge = Math.floor(ttlMs / 1000);
-      document.cookie = key + "=" + encodeURIComponent(JSON.stringify(value)) + ";path=/;max-age=" + maxAge + ";SameSite=Lax";
-    } catch(e) {}
-  }
-
-  function migrateLegacyUtm() {
-    if (!storageGet(UTM_LAST_KEY)) {
-      var legacyLast = storageGet(LEGACY_UTM_LAST_KEY);
-      if (legacyLast) storageSet(UTM_LAST_KEY, legacyLast, UTM_TTL_MS);
-    }
-    if (!storageGet(UTM_FIRST_KEY)) {
-      var legacyFirst = storageGet(LEGACY_UTM_FIRST_KEY);
-      if (legacyFirst) storageSet(UTM_FIRST_KEY, legacyFirst, UTM_TTL_MS);
-    }
-  }
-
-  function readUrlUtm() {
-    var params = new URLSearchParams(window.location.search);
-    if (!params.get("utm_source") && !params.get("utm_medium") && !params.get("utm_campaign") && !params.get("utm_term") && !params.get("utm_content")) return null;
-    return {
-      utmSource:   params.get("utm_source")   || "",
-      utmMedium:   params.get("utm_medium")   || "",
-      utmCampaign: params.get("utm_campaign") || "",
-      utmTerm:     params.get("utm_term")     || "",
-      utmContent:  params.get("utm_content")  || "",
-      referrer:    document.referrer || "",
-      seenAt:      new Date().toISOString()
-    };
-  }
-
-  function inferFromReferrer() {
-    var ref = document.referrer;
-    if (!ref) return null;
-    try {
-      var u = new URL(ref);
-      var host = u.hostname.replace(/^www\\./, "").toLowerCase();
-      // 같은 사이트 내부 이동은 외부 유입 아님
-      if (u.hostname === location.hostname) return null;
-      var matched = null;
-      for (var k in REFERRER_MAP) {
-        if (host === k || host.endsWith("." + k)) { matched = REFERRER_MAP[k]; break; }
-      }
-      if (matched) {
-        return {
-          utmSource: matched[0], utmMedium: matched[1],
-          utmCampaign: "", utmTerm: "", utmContent: "",
-          referrer: ref, seenAt: new Date().toISOString()
-        };
-      }
-      return {
-        utmSource: host, utmMedium: "referral",
-        utmCampaign: "", utmTerm: "", utmContent: "",
-        referrer: ref, seenAt: new Date().toISOString()
-      };
-    } catch(e) { return null; }
-  }
-
-  // 매 페이지 로드마다 실행 — URL 에 utm 이 있으면 last 갱신 + (없으면) first 설정
-  function captureUtm() {
-    var urlUtm = readUrlUtm();
-    if (urlUtm) {
-      storageSet(UTM_LAST_KEY, urlUtm, UTM_TTL_MS);
-      if (!storageGet(UTM_FIRST_KEY)) storageSet(UTM_FIRST_KEY, urlUtm, UTM_TTL_MS);
-      return;
-    }
-    // URL 에 utm 없음 — first 가 아예 없으면 referrer 로 추론해서 저장
-    if (!storageGet(UTM_FIRST_KEY)) {
-      var refUtm = inferFromReferrer();
-      if (refUtm) {
-        storageSet(UTM_LAST_KEY, refUtm, UTM_TTL_MS);
-        storageSet(UTM_FIRST_KEY, refUtm, UTM_TTL_MS);
-      }
-    }
-  }
   migrateLegacyUtm();
   captureUtm();
 
   function getUtmContext() {
     var last = storageGet(UTM_LAST_KEY) || emptyUtm();
     var first = storageGet(UTM_FIRST_KEY) || last;
-    // 둘 다 비어있는데 referrer 라도 있으면 last 로 채움 (이번 페이지 진입 시점)
     if (!last.utmSource && !first.utmSource) {
       var refUtm = inferFromReferrer();
       if (refUtm) { last = refUtm; first = refUtm; }
     }
-    return { last: last, first: first };
+    var journey = storageGet(JOURNEY_KEY) || [];
+    if (!Array.isArray(journey)) journey = [];
+    return { last: last, first: first, journey: journey };
   }
 
   function getFieldMeta() {
@@ -316,7 +383,6 @@ ${fieldMap}
       var els = group.querySelectorAll("input, select, textarea");
       if (!els || els.length === 0) return;
 
-      // 체크박스/라디오: 체크된 항목들의 라벨 텍스트(없으면 value) 콤마로 join
       var checked = [];
       var hasChoice = false;
       var textValues = [];
@@ -342,8 +408,7 @@ ${fieldMap}
       } else if (textValues.length === 1) {
         data[field.key] = textValues[0];
       } else {
-        // 휴대폰처럼 분할된 input — 모두 숫자면 그대로 이어붙임, 아니면 공백으로 join
-        var allNumeric = textValues.every(function(v) { return /^\d+$/.test(v); });
+        var allNumeric = textValues.every(function(v) { return /^\\d+$/.test(v); });
         data[field.key] = textValues.join(allNumeric ? "" : " ");
       }
     });
@@ -366,14 +431,17 @@ ${fieldMap}
         utmCampaign: last.utmCampaign,
         utmTerm:     last.utmTerm,
         utmContent:  last.utmContent,
+        utmId:       last.utmId || "",
         firstUtmSource:   first.utmSource,
         firstUtmMedium:   first.utmMedium,
         firstUtmCampaign: first.utmCampaign,
         firstUtmTerm:     first.utmTerm,
         firstUtmContent:  first.utmContent,
+        firstUtmId:       first.utmId || "",
         firstReferrer:    first.referrer || "",
         firstSeenAt:      first.seenAt   || "",
-        referrer: document.referrer,
+        journey:   ctx.journey,
+        referrer:  document.referrer,
         userAgent: navigator.userAgent
       })
     }).catch(function() {});
@@ -382,7 +450,6 @@ ${fieldMap}
   var triggered = false;
   var pendingData = null;
 
-  // 제출/확인 버튼 클릭 시점에 미리 데이터 스냅샷 (폼 초기화 전)
   document.addEventListener("click", function(e) {
     if (triggered) return;
     var target = e.target;

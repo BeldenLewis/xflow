@@ -273,14 +273,18 @@ model CollectRecord {
   utmCampaign      String?
   utmTerm          String?
   utmContent       String?
+  utmId            String?
   // first-touch attribution (최초 유입 시점의 UTM)
   firstUtmSource   String?
   firstUtmMedium   String?
   firstUtmCampaign String?
   firstUtmTerm     String?
   firstUtmContent  String?
+  firstUtmId       String?
   firstReferrer    String?
   firstSeenAt      DateTime?
+  // multi-touch journey (touchpoint 시계열, 최대 20개)
+  journey          Json?
   referrer         String?
   userAgent        String?
   ip               String?

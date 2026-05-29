@@ -250,22 +250,54 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   let skipped = 0;
 
   if (mode === "skip") {
+    // 중복 기준 필드 (설정된 경우). A 방식: 첫 필드 우선, 값 비어있으면 다음 필드로 fallback.
+    // 예) ["field_19","field_9"] → 고유번호 있으면 고유번호로, 없으면 연락처로 판정.
+    // 어느 키에도 값이 없으면 전체 필드 시그니처로 최종 fallback.
+    const dedupKeys: string[] = Array.isArray(source.dedupKeyFields) ? source.dedupKeyFields : [];
+
+    // 레코드에서 중복 판정 키 추출. 값 있는 첫 dedupKey를 "k:필드:정규화값" 형태로 반환.
+    // dedupKey 전부 비었으면 null → 전체 시그니처 fallback.
+    const dedupKeyOf = (data: Record<string, unknown> | null | undefined): string | null => {
+      if (!data) return null;
+      for (const f of dedupKeys) {
+        const raw = (data as Record<string, unknown>)[f];
+        const v = raw == null ? "" : String(raw).trim().toLowerCase();
+        if (v !== "") return `k:${f}:${v}`;
+      }
+      return null;
+    };
+
     const existing = await prisma.collectRecord.findMany({
       where: { sourceId: source.id },
       select: { createdAt: true, data: true },
     });
-    const existingSigs = new Set(existing.map((e) => signatureOf(e.createdAt, e.data)));
 
-    const seenInBatch = new Set<string>();
+    // 두 개의 색인: 중복키 집합 + 전체 시그니처 집합
+    const existingDedupKeys = new Set<string>();
+    const existingSigs = new Set<string>();
+    for (const e of existing) {
+      const dk = dedupKeyOf(e.data as Record<string, unknown>);
+      if (dk) existingDedupKeys.add(dk);
+      existingSigs.add(signatureOf(e.createdAt, e.data));
+    }
+
+    const seenDedupKeys = new Set<string>();
+    const seenSigs = new Set<string>();
     toInsert = [];
     for (const row of insertableRows) {
-      const sig = signatureOf(row.createdAt ?? null, row.data);
-      if (existingSigs.has(sig) || seenInBatch.has(sig)) {
-        skipped++;
-        continue;
+      const dk = dedupKeyOf(row.data);
+      if (dk) {
+        // 중복 기준 필드로 판정
+        if (existingDedupKeys.has(dk) || seenDedupKeys.has(dk)) { skipped++; continue; }
+        seenDedupKeys.add(dk);
+        toInsert.push(row);
+      } else {
+        // 기준 필드 값이 모두 비어있음 → 전체 시그니처 fallback
+        const sig = signatureOf(row.createdAt ?? null, row.data);
+        if (existingSigs.has(sig) || seenSigs.has(sig)) { skipped++; continue; }
+        seenSigs.add(sig);
+        toInsert.push(row);
       }
-      seenInBatch.add(sig);
-      toInsert.push(row);
     }
   }
 

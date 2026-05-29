@@ -1,0 +1,1 @@
+ALTER TABLE "CollectSource" ADD COLUMN IF NOT EXISTS "dedupKeyFields" TEXT[] NOT NULL DEFAULT '{}';

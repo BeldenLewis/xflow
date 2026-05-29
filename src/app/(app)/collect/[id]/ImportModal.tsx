@@ -70,7 +70,8 @@ interface ImportResult {
   error?: string;
 }
 
-const IMPORT_BATCH_SIZE = 10000;
+// Vercel 요청 본문 4.5MB 한도 회피 — 레코드 1건당 수백 바이트라 1500건이면 ~1MB 내외.
+const IMPORT_BATCH_SIZE = 1500;
 
 function normalize(s: string) {
   return s.trim().toLowerCase().replace(/\s+/g, "").replace(/[_\-/().]/g, "");
@@ -492,17 +493,23 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
       try {
         const { records } = buildImportRecords(sheet, targets);
         if (records.length === 0) { if (!cancelled) setDryRun(null); return; }
-        const res = await fetch(`/api/collect-sources/${sourceId}/records/import`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ records, mode: "skip", dryRun: true }),
-        });
-        const data = await res.json().catch(() => null);
-        if (!cancelled && res.ok && data?.dryRun) {
-          setDryRun({ wouldImport: data.wouldImport ?? 0, wouldSkip: data.wouldSkip ?? 0 });
-        } else if (!cancelled) {
-          setDryRun(null);
+        // 4.5MB 본문 한도 회피 — 청크로 나눠서 dry-run. 서버는 각 청크를 기존 DB와
+        // 비교하므로 DB 대비 중복은 정확. (파일 내부 청크 간 중복은 미세 오차 — 미리보기용으로 충분)
+        let wouldImport = 0, wouldSkip = 0;
+        for (let i = 0; i < records.length; i += IMPORT_BATCH_SIZE) {
+          if (cancelled) return;
+          const chunk = records.slice(i, i + IMPORT_BATCH_SIZE);
+          const res = await fetch(`/api/collect-sources/${sourceId}/records/import`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ records: chunk, mode: "skip", dryRun: true }),
+          });
+          const data = await res.json().catch(() => null);
+          if (!res.ok || !data?.dryRun) { if (!cancelled) setDryRun(null); return; }
+          wouldImport += data.wouldImport ?? 0;
+          wouldSkip += data.wouldSkip ?? 0;
         }
+        if (!cancelled) setDryRun({ wouldImport, wouldSkip });
       } catch { if (!cancelled) setDryRun(null); }
       finally { if (!cancelled) setDryRunLoading(false); }
     }, 600);

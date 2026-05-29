@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Upload, FileSpreadsheet, Loader2, ArrowRight, Check } from "lucide-react";
 import { toast } from "sonner";
@@ -359,6 +359,9 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
   const [dedupMode, setDedupMode] = useState<"skip" | "merge" | "all">("skip");
   const [mergeKeyField, setMergeKeyField] = useState<string>(fieldMappings[0]?.key ?? "");
   const [mergeUpdateFields, setMergeUpdateFields] = useState<string[]>([]);
+  // skip 모드 dry-run 결과 — 버튼에 "신규 N건 (중복 M건 제외)" 표시용
+  const [dryRun, setDryRun] = useState<{ wouldImport: number; wouldSkip: number } | null>(null);
+  const [dryRunLoading, setDryRunLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (file: File) => {
@@ -476,6 +479,35 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
   const previewRows = sheet?.rows.slice(0, 3) ?? [];
   const mergeUpdateOptions = getUpdateOptions(targets, fieldMappings);
   const importDiagnostics = sheet ? buildImportRecords(sheet, targets).diagnostics : null;
+
+  // skip 모드일 때 dry-run으로 실제 신규/중복 건수 미리 계산 (debounce 600ms)
+  useEffect(() => {
+    if (step !== "map" || !sheet || dedupMode !== "skip") {
+      setDryRun(null);
+      return;
+    }
+    let cancelled = false;
+    setDryRunLoading(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const { records } = buildImportRecords(sheet, targets);
+        if (records.length === 0) { if (!cancelled) setDryRun(null); return; }
+        const res = await fetch(`/api/collect-sources/${sourceId}/records/import`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ records, mode: "skip", dryRun: true }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!cancelled && res.ok && data?.dryRun) {
+          setDryRun({ wouldImport: data.wouldImport ?? 0, wouldSkip: data.wouldSkip ?? 0 });
+        } else if (!cancelled) {
+          setDryRun(null);
+        }
+      } catch { if (!cancelled) setDryRun(null); }
+      finally { if (!cancelled) setDryRunLoading(false); }
+    }, 600);
+    return () => { cancelled = true; window.clearTimeout(timer); setDryRunLoading(false); };
+  }, [step, sheet, targets, dedupMode, sourceId]);
   const importProgressPercent = importProgress && importProgress.total > 0
     ? Math.round((importProgress.done / importProgress.total) * 100)
     : 0;
@@ -764,12 +796,18 @@ export default function ImportModal({ sourceId, fieldMappings, onClose, onImport
                   disabled={importing}
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
                 >
-                  {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  {importing || dryRunLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                   {importing && importProgress
                     ? `${importProgress.done.toLocaleString()} / ${importProgress.total.toLocaleString()} 처리 중`
                     : importing
                       ? "가져오는 중..."
-                      : `${importDiagnostics?.importableRows ?? sheet?.rows.length ?? 0}건 가져오기`}
+                      : dedupMode === "skip" && dryRunLoading
+                        ? "중복 확인 중..."
+                        : dedupMode === "skip" && dryRun
+                          ? (dryRun.wouldSkip > 0
+                              ? `신규 ${dryRun.wouldImport.toLocaleString()}건 가져오기 (중복 ${dryRun.wouldSkip.toLocaleString()}건 제외)`
+                              : `${dryRun.wouldImport.toLocaleString()}건 가져오기`)
+                          : `${importDiagnostics?.importableRows ?? sheet?.rows.length ?? 0}건 가져오기`}
                 </button>
               </div>
             </div>

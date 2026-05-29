@@ -58,6 +58,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const updateFields: string[] | undefined = Array.isArray(body?.updateFields)
     ? body.updateFields.filter((v: unknown): v is string => typeof v === "string")
     : undefined;
+  // dry-run: 실제 저장 없이 skip 모드에서 몇 건이 신규/중복인지 미리 계산.
+  const dryRun: boolean = body?.dryRun === true;
 
   if (!Array.isArray(records) || records.length === 0) {
     return NextResponse.json({ error: "가져올 레코드가 없어요" }, { status: 400 });
@@ -260,6 +262,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       seenInBatch.add(sig);
       toInsert.push(row);
     }
+  }
+
+  // dry-run: 저장하지 않고 예상 건수만 반환.
+  if (dryRun) {
+    return NextResponse.json({ dryRun: true, wouldImport: toInsert.length, wouldSkip: skipped });
   }
 
   const CHUNK_SIZE = 2000;

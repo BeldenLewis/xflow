@@ -363,10 +363,18 @@ ${fieldMap}
   ];
 
   // glob 매칭: \`*\` 는 어떤 문자열에도 매칭. 정규식 메타문자는 이스케이프.
+  // 대소문자 무시 + 끝 슬래시 관용 (URL 경로는 흔히 대소문자/슬래시가 섞임).
+  function normPath(p) {
+    p = (p || "/").toLowerCase();
+    if (p.length > 1 && p.charAt(p.length - 1) === "/") p = p.slice(0, -1);
+    return p;
+  }
   function pathMatchesPattern(pathname, pattern) {
-    var escaped = pattern.replace(/[.+?^\${}()|[\\]\\\\]/g, "\\\\$&").replace(/\\*/g, ".*");
+    var pat = normPath(pattern);
+    var path = normPath(pathname);
+    var escaped = pat.replace(/[.+?^\${}()|[\\]\\\\]/g, "\\\\$&").replace(/\\*/g, ".*");
     try {
-      return new RegExp("^" + escaped + "$").test(pathname);
+      return new RegExp("^" + escaped + "$").test(path);
     } catch (e) { return false; }
   }
 

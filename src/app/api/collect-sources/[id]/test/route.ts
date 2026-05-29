@@ -14,10 +14,18 @@ import { prisma } from "@/lib/prisma";
 //      1줄 loader 는 src 로 들어가므로 HTML 안에 URL 그대로 노출됨.
 
 // glob 매칭(서버측 미러). collect-script.ts 의 pathMatchesPattern 과 동일 로직.
+// 대소문자 무시 + 끝 슬래시 관용.
+function normPath(p: string): string {
+  let s = (p || "/").toLowerCase();
+  if (s.length > 1 && s.endsWith("/")) s = s.slice(0, -1);
+  return s;
+}
 function pathMatchesPattern(pathname: string, pattern: string): boolean {
-  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+  const pat = normPath(pattern);
+  const path = normPath(pathname);
+  const escaped = pat.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
   try {
-    return new RegExp("^" + escaped + "$").test(pathname);
+    return new RegExp("^" + escaped + "$").test(path);
   } catch {
     return false;
   }

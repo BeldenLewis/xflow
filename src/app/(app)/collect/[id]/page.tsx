@@ -10,7 +10,7 @@ import {
   Download, Upload, ArrowUp, ArrowDown, ChevronsUpDown, Wand2,
   ChevronLeft, ChevronRight, Search, Filter, Activity, Shield,
   RefreshCcw, Bell, Webhook, KeyRound, Eraser, AlertTriangle, ShieldAlert,
-  MoreHorizontal, Link2, Wrench, HardDriveDownload, Columns3, MapPin, X,
+  MoreHorizontal, Link2, Wrench, HardDriveDownload, Columns3, MapPin, X, Layers,
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -68,6 +68,7 @@ interface CollectSource {
   notifyOnSubmit: boolean;
   allowedOrigins: string[];
   formPagePatterns: string[];
+  dedupKeyFields: string[];
   fieldMappings: FieldMapping[];
   discoveredFields: DiscoveredField[] | null;
   _count: { records: number };
@@ -198,6 +199,9 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
   const [formPagePatterns, setFormPagePatterns] = useState<string[]>([]);
   const [formPagePatternInput, setFormPagePatternInput] = useState("");
   const [savingFormPagePatterns, setSavingFormPagePatterns] = useState(false);
+  // 중복 기준 필드 (가져오기 시 중복 판정용 우선순위 필드)
+  const [dedupKeyFields, setDedupKeyFields] = useState<string[]>([]);
+  const [savingDedup, setSavingDedup] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [regeneratingKey, setRegeneratingKey] = useState(false);
 
@@ -232,6 +236,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
       setSettingsNotifyOnSubmit(!!data.source.notifyOnSubmit);
       setSettingsAllowedOrigins((data.source.allowedOrigins ?? []).join("\n"));
       setFormPagePatterns(Array.isArray(data.source.formPagePatterns) ? data.source.formPagePatterns : []);
+      setDedupKeyFields(Array.isArray(data.source.dedupKeyFields) ? data.source.dedupKeyFields : []);
     } finally {
       setIsLoading(false);
     }
@@ -630,6 +635,25 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
       toast.success("폼 페이지 패턴 저장됨. 5분 내 사이트에 적용돼요");
     } finally {
       setSavingFormPagePatterns(false);
+    }
+  };
+
+  const handleSaveDedupKeyFields = async () => {
+    setSavingDedup(true);
+    try {
+      const res = await fetch(`/api/collect-sources/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dedupKeyFields }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "저장 실패"); return; }
+      const saved = Array.isArray(data.source?.dedupKeyFields) ? data.source.dedupKeyFields : dedupKeyFields;
+      setDedupKeyFields(saved);
+      setSource((s) => s ? { ...s, dedupKeyFields: saved } : s);
+      toast.success("중복 기준 필드가 저장됐어요");
+    } finally {
+      setSavingDedup(false);
     }
   };
 
@@ -1446,6 +1470,87 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                     className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
                   >
                     {savingFormPagePatterns ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    저장
+                  </motion.button>
+                </div>
+              </div>
+
+              {/* 중복 기준 필드 — 가져오기 시 이 필드들로 중복 판정 */}
+              <div className="rounded-2xl border border-border bg-background p-5 space-y-4">
+                <div className="flex items-start gap-3">
+                  <Layers className="w-4 h-4 text-violet-500 shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">중복 기준 필드 <span className="text-xs font-normal text-muted-foreground">(선택)</span></p>
+                    <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                      엑셀/CSV 가져오기에서 &quot;중복 건너뛰기&quot;로 중복을 판정할 기준 필드예요.
+                      위에서부터 우선 적용하고, 값이 비어있으면 다음 필드로 넘어가요.
+                      <br />
+                      <span className="text-foreground/70">비워두면 전체 항목이 같을 때만 중복으로 봐요.</span>
+                    </p>
+                  </div>
+                </div>
+
+                {/* 선택된 필드 — 순서 = 우선순위 */}
+                {dedupKeyFields.length > 0 && (
+                  <div className="space-y-1.5">
+                    <AnimatePresence initial={false}>
+                      {dedupKeyFields.map((fk, idx) => {
+                        const label = fields.find((f) => f.key === fk)?.label ?? fk;
+                        return (
+                          <motion.div
+                            key={fk}
+                            layout
+                            initial={{ opacity: 0, scale: 0.97 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.97 }}
+                            transition={spring}
+                            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-violet-500/5 border border-violet-400/30"
+                          >
+                            <span className="text-[11px] font-mono text-violet-500 w-9 shrink-0">{idx + 1}순위</span>
+                            <span className="flex-1 text-sm min-w-0 truncate">{label} <span className="text-xs font-mono text-muted-foreground">({fk})</span></span>
+                            <button
+                              type="button"
+                              onClick={() => setDedupKeyFields((arr) => arr.filter((x) => x !== fk))}
+                              aria-label={`${label} 제거`}
+                              className="text-muted-foreground hover:text-red-500 transition-colors shrink-0"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </motion.div>
+                        );
+                      })}
+                    </AnimatePresence>
+                  </div>
+                )}
+
+                {/* 필드 추가 드롭다운 */}
+                <div className="flex items-center gap-2">
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v && !dedupKeyFields.includes(v)) setDedupKeyFields((arr) => [...arr, v].slice(0, 10));
+                    }}
+                    className="flex-1 px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:border-violet-400"
+                  >
+                    <option value="">+ 기준 필드 추가</option>
+                    {fields.filter((f) => !dedupKeyFields.includes(f.key)).map((f) => (
+                      <option key={f.key} value={f.key}>{f.label} ({f.key})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex justify-end">
+                  <motion.button
+                    type="button"
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.96 }}
+                    transition={spring}
+                    onClick={() => void handleSaveDedupKeyFields()}
+                    disabled={savingDedup}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-colors disabled:opacity-40"
+                  >
+                    {savingDedup ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                     저장
                   </motion.button>
                 </div>

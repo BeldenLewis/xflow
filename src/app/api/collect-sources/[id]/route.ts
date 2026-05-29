@@ -60,7 +60,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const body = await request.json();
   const {
     name, description, siteUrl, successTrigger, redirectUrl, isActive,
-    webhookUrl, notifyOnSubmit, allowedOrigins, formPagePatterns,
+    webhookUrl, notifyOnSubmit, allowedOrigins, formPagePatterns, dedupKeyFields,
   } = body;
 
   let normalizedAllowed: string[] | undefined;
@@ -83,6 +83,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     normalizedFormPagePatterns = Array.from(new Set(normalizedFormPagePatterns)).slice(0, 20);
   }
 
+  // dedupKeyFields: 가져오기 중복 판정용 우선순위 필드 key 목록. 빈 배열 = 전체 시그니처 fallback.
+  // trim + 빈값 제거 + 중복 제거, 최대 10개.
+  let normalizedDedupKeyFields: string[] | undefined;
+  if (Array.isArray(dedupKeyFields)) {
+    normalizedDedupKeyFields = dedupKeyFields
+      .filter((k): k is string => typeof k === "string")
+      .map((k) => k.trim())
+      .filter((k) => k.length > 0);
+    normalizedDedupKeyFields = Array.from(new Set(normalizedDedupKeyFields)).slice(0, 10);
+  }
+
   const source = await prisma.collectSource.update({
     where: { id },
     data: {
@@ -96,6 +107,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       ...(notifyOnSubmit !== undefined && { notifyOnSubmit: !!notifyOnSubmit }),
       ...(normalizedAllowed !== undefined && { allowedOrigins: normalizedAllowed }),
       ...(normalizedFormPagePatterns !== undefined && { formPagePatterns: normalizedFormPagePatterns }),
+      ...(normalizedDedupKeyFields !== undefined && { dedupKeyFields: normalizedDedupKeyFields }),
     },
     include: { fieldMappings: { orderBy: { sortOrder: "asc" } } },
   });

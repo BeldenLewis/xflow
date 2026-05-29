@@ -16,6 +16,7 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/api/shorten-url") ||
     pathname.startsWith("/api/health") ||
     pathname.startsWith("/share") ||
+    pathname.startsWith("/s/") ||
     pathname.startsWith("/r/") ||
     pathname.startsWith("/api/cron")
   ) {

@@ -21,8 +21,13 @@ type DedupMode = "skip" | "all" | "merge";
 // 같은 데이터를 의도적으로 여러 번 넣고 싶다면 "모두 추가" 모드를 사용하세요.
 function signatureOf(_createdAt: Date | string | null | undefined, data: unknown): string {
   const obj = (data && typeof data === "object") ? data as Record<string, unknown> : {};
-  const sortedKeys = Object.keys(obj).sort();
-  const normalized = sortedKeys.map((k) => [k, obj[k] == null ? "" : String(obj[k]).trim().toLowerCase()]);
+  // 빈 값(빈 문자열/공백/null)은 시그니처에서 제외.
+  // 폼 제출은 빈 항목도 {field_3:""}로 저장하지만, 엑셀 가져오기는 빈 셀 키를 누락 →
+  // 빈 값을 포함하면 같은 레코드인데 키 집합이 달라 중복 매칭이 전부 실패함.
+  const normalized = Object.keys(obj)
+    .map((k) => [k, obj[k] == null ? "" : String(obj[k]).trim().toLowerCase()] as [string, string])
+    .filter(([, v]) => v !== "")
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   return JSON.stringify(normalized);
 }
 

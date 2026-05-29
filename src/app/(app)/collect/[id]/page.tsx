@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { use } from "react";
 import { motion, AnimatePresence, Reorder } from "framer-motion";
 import {
@@ -160,10 +160,12 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
   const [tab, setTab] = useState<Tab>("records");
 
   const [records, setRecords] = useState<CollectRecord[]>([]);
-  const [recordsTotal, setRecordsTotal] = useState(0);
+  const [recordsTotal, setRecordsTotal] = useState(0); // 필터 적용된 서버 카운트 (현재 조회 조건 기준)
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false); // 전체 결과 선택 진행 중
   const [showImport, setShowImport] = useState(false);
   const [showCleanup, setShowCleanup] = useState(false);
   const [showNormalize, setShowNormalize] = useState(false);
@@ -184,12 +186,18 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
 
-  // 검색/필터
+  // 검색/필터 — 서버 페이지네이션. 검색어는 디바운스(300ms) 후 서버 요청.
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
   const [filterUtmSource, setFilterUtmSource] = useState("");
   const [filterUtmMedium, setFilterUtmMedium] = useState("");
+  // UTM 필터 드롭다운 옵션 — 누적된 distinct 값 (페이지/검색을 거치며 본 값들의 합집합)
+  const [utmSourceOptions, setUtmSourceOptions] = useState<string[]>([]);
+  const [utmMediumOptions, setUtmMediumOptions] = useState<string[]>([]);
+  // "전체 결과 선택" — 현재 필터에 매칭되는 모든 레코드(현재 페이지 밖 포함)를 선택한 상태
+  const [selectAllMatching, setSelectAllMatching] = useState(false);
 
   // 설정 폼
   const [settingsWebhookUrl, setSettingsWebhookUrl] = useState("");
@@ -242,18 +250,58 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
     }
   }, [id]);
 
+  // 현재 검색/필터/정렬 상태를 records API 쿼리스트링으로 직렬화 (페이지네이션 제외)
+  const buildFilterQuery = useCallback(() => {
+    const qs = new URLSearchParams();
+    if (debouncedSearch.trim()) qs.set("q", debouncedSearch.trim());
+    // 날짜 필터는 KST 경계로 ISO 변환해 전달
+    if (filterDateFrom) qs.set("from", `${filterDateFrom}T00:00:00+09:00`);
+    if (filterDateTo) qs.set("to", `${filterDateTo}T23:59:59+09:00`);
+    if (filterUtmSource) qs.set("utmSource", filterUtmSource);
+    if (filterUtmMedium) qs.set("utmMedium", filterUtmMedium);
+    if (sort) {
+      qs.set("sort", sort.kind);
+      qs.set("dir", sort.dir);
+      if (sort.kind === "field" && sort.fieldKey) qs.set("sortField", sort.fieldKey);
+    }
+    return qs;
+  }, [debouncedSearch, filterDateFrom, filterDateTo, filterUtmSource, filterUtmMedium, sort]);
+
   const fetchRecords = useCallback(async () => {
     setRecordsLoading(true);
     try {
-      const res = await fetch(`/api/collect-sources/${id}/records`);
+      const qs = buildFilterQuery();
+      qs.set("page", String(page));
+      qs.set("limit", String(pageSize));
+      const res = await fetch(`/api/collect-sources/${id}/records?${qs.toString()}`);
       const data = await res.json();
-      setRecords(data.records ?? []);
-      setRecordsTotal(data.total ?? 0);
-      setSelectedIds(new Set());
+      const fetched: CollectRecord[] = data.records ?? [];
+      const total: number = data.total ?? 0;
+      setRecords(fetched);
+      setRecordsTotal(total);
+      // 삭제 등으로 현재 페이지가 범위를 벗어났으면 마지막 페이지로 보정 → 재조회
+      const maxPage = Math.max(1, Math.ceil(total / pageSize));
+      if (page > maxPage) setPage(maxPage);
+      // 본 적 있는 UTM 값을 누적해 드롭다운 옵션 구성
+      setUtmSourceOptions((prev) => {
+        const merged = new Set(prev);
+        fetched.forEach((r) => { if (r.utmSource) merged.add(r.utmSource); });
+        return Array.from(merged).sort();
+      });
+      setUtmMediumOptions((prev) => {
+        const merged = new Set(prev);
+        fetched.forEach((r) => { if (r.utmMedium) merged.add(r.utmMedium); });
+        return Array.from(merged).sort();
+      });
+      // 전체 선택 모드가 아니면, 더 이상 화면에 없는 선택 항목은 정리
+      if (!selectAllMatchingRef.current) {
+        const pageIds = new Set(fetched.map((r) => r.id));
+        setSelectedIds((prev) => new Set(Array.from(prev).filter((rid) => pageIds.has(rid))));
+      }
     } finally {
       setRecordsLoading(false);
     }
-  }, [id]);
+  }, [id, page, pageSize, buildFilterQuery]);
 
   const toggleSelect = (recordId: string) => {
     setSelectedIds((prev) => {
@@ -264,9 +312,11 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
     });
   };
 
+  // 현재 페이지의 레코드만 선택/해제 (전체 결과 선택은 별도 배너 버튼)
   const toggleSelectAll = () => {
-    const pageIds = pagedRecords.map((r) => r.id);
+    const pageIds = records.map((r) => r.id);
     const allChecked = pageIds.length > 0 && pageIds.every((rid) => selectedIds.has(rid));
+    setSelectAllMatching(false);
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (allChecked) pageIds.forEach((rid) => next.delete(rid));
@@ -275,19 +325,45 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
     });
   };
 
+  // 현재 필터에 매칭되는 모든 레코드를 선택 (현재 페이지 밖 포함)
+  const selectAllAcrossPages = async () => {
+    if (selectingAll) return;
+    setSelectingAll(true);
+    try {
+      const all = await fetchAllMatchingRecords();
+      setSelectedIds(new Set(all.map((r) => r.id)));
+      setSelectAllMatching(true);
+    } catch {
+      toast.error("전체 선택에 실패했어요");
+    } finally {
+      setSelectingAll(false);
+    }
+  };
+
   const handleDeleteSelected = async () => {
     if (selectedIds.size === 0) return;
     setIsDeleting(true);
     try {
-      const res = await fetch(`/api/collect-sources/${id}/records`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: Array.from(selectedIds) }),
-      });
-      const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "삭제 실패"); return; }
-      toast.success(`${data.deleted}건 삭제됐어요`);
+      // 대량 선택(전체 선택) 시 요청 본문 413 방지를 위해 1000건씩 분할 삭제
+      const allIds = Array.from(selectedIds);
+      const chunkSize = 1000;
+      let deleted = 0;
+      for (let i = 0; i < allIds.length; i += chunkSize) {
+        const chunk = allIds.slice(i, i + chunkSize);
+        const res = await fetch(`/api/collect-sources/${id}/records`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: chunk }),
+        });
+        const data = await res.json();
+        if (!res.ok) { toast.error(data.error ?? "삭제 실패"); return; }
+        deleted += data.deleted ?? 0;
+      }
+      toast.success(`${deleted.toLocaleString()}건 삭제됐어요`);
       setShowDeleteSelectedModal(false);
+      setSelectAllMatching(false);
+      setSelectedIds(new Set());
+      await fetchSource(); // 전체 카운트 갱신
       await fetchRecords();
     } finally {
       setIsDeleting(false);
@@ -297,7 +373,11 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
   // 필터/선택이 없으면 서버 export(전체), 있으면 클라이언트에서 필터된 결과 export
   const handleExportCsv = () => { handleExportCsvWithFilter(); };
 
+  // 필터/정렬 변경 시 1페이지로 + 전체선택 해제 (이벤트 핸들러 → 동기 setState 허용)
+  const resetToFirstPage = () => { setPage(1); setSelectAllMatching(false); };
+
   const cycleSort = (kind: SortKind, fieldKey?: string) => {
+    resetToFirstPage();
     setSort((prev) => {
       const same = prev && prev.kind === kind && prev.fieldKey === fieldKey;
       if (!same) return { kind, fieldKey, dir: "asc" };
@@ -306,74 +386,35 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
     });
   };
 
-  const filteredRecords = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    const fromTs = filterDateFrom ? new Date(filterDateFrom + "T00:00:00+09:00").getTime() : null;
-    const toTs = filterDateTo ? new Date(filterDateTo + "T23:59:59+09:00").getTime() : null;
-    return records.filter((r) => {
-      if (q) {
-        const haystack = [
-          ...Object.values(r.data ?? {}),
-          r.utmSource, r.utmMedium, r.utmCampaign, r.utmTerm, r.utmContent, r.referrer,
-        ].filter(Boolean).join(" ").toLowerCase();
-        if (!haystack.includes(q)) return false;
-      }
-      if (fromTs || toTs) {
-        const t = new Date(r.createdAt).getTime();
-        if (fromTs && t < fromTs) return false;
-        if (toTs && t > toTs) return false;
-      }
-      if (filterUtmSource && (r.utmSource ?? "") !== filterUtmSource) return false;
-      if (filterUtmMedium && (r.utmMedium ?? "") !== filterUtmMedium) return false;
-      return true;
-    });
-  }, [records, searchQuery, filterDateFrom, filterDateTo, filterUtmSource, filterUtmMedium]);
-
-  const sortedRecords = useMemo(() => {
-    if (!sort) return filteredRecords;
-    const dir = sort.dir === "asc" ? 1 : -1;
-    const getValue = (r: CollectRecord): string | number | null => {
-      if (sort.kind === "createdAt") return new Date(r.createdAt).getTime();
-      if (sort.kind === "utmSource") return r.utmSource ?? "";
-      if (sort.kind === "utmMedium") return r.utmMedium ?? "";
-      return r.data?.[sort.fieldKey ?? ""] ?? "";
-    };
-    return [...filteredRecords].sort((a, b) => {
-      const av = getValue(a);
-      const bv = getValue(b);
-      if (av === null || av === undefined || av === "") return 1;
-      if (bv === null || bv === undefined || bv === "") return -1;
-      if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir;
-      return String(av).localeCompare(String(bv), "ko", { numeric: true }) * dir;
-    });
-  }, [filteredRecords, sort]);
-
-  const utmSourceOptions = useMemo(
-    () => Array.from(new Set(records.map((r) => r.utmSource).filter((v): v is string => !!v))).sort(),
-    [records],
-  );
-  const utmMediumOptions = useMemo(
-    () => Array.from(new Set(records.map((r) => r.utmMedium).filter((v): v is string => !!v))).sort(),
-    [records],
-  );
+  // 서버가 필터·정렬·페이지네이션을 처리하므로 클라이언트는 받은 records 를 그대로 표시.
+  // recordsTotal = 현재 필터 조건에 매칭되는 전체 건수, recordsGrandTotal = 무필터 전체 건수.
+  const recordsGrandTotal = source?._count?.records ?? 0;
 
   const hasActiveFilter = !!(searchQuery || filterDateFrom || filterDateTo || filterUtmSource || filterUtmMedium);
   const resetFilters = () => {
     setSearchQuery(""); setFilterDateFrom(""); setFilterDateTo("");
     setFilterUtmSource(""); setFilterUtmMedium("");
+    resetToFirstPage();
   };
 
-  const totalPages = Math.max(1, Math.ceil(sortedRecords.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(recordsTotal / pageSize));
   const safePage = Math.min(page, totalPages);
   const pageStart = (safePage - 1) * pageSize;
-  const pageEnd = pageStart + pageSize;
-  const pagedRecords = useMemo(
-    () => sortedRecords.slice(pageStart, pageEnd),
-    [sortedRecords, pageStart, pageEnd],
-  );
+  const pageEnd = pageStart + records.length;
 
-  // 정렬/페이지 크기/필터 변경 시 1페이지로
-  useEffect(() => { setPage(1); }, [sort, pageSize, recordsTotal, searchQuery, filterDateFrom, filterDateTo, filterUtmSource, filterUtmMedium]);
+  // 검색어 디바운스 (300ms) — 매 타이핑마다 서버 요청 방지.
+  // 검색어가 바뀌면 1페이지로 리셋(타임아웃 콜백 내 처리 → 효과 본문 동기 setState 회피).
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+      setPage(1);
+      setSelectAllMatching(false);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  // 필터/정렬/페이지 크기는 이벤트 핸들러에서 즉시 1페이지로 리셋한다(resetToFirstPage).
+  // 레코드 변경(삭제/정리 등) 후에도 핸들러에서 페이지를 보정하므로 별도 보정 효과가 필요 없다.
 
   const sortIcon = (kind: SortKind, fieldKey?: string) => {
     const active = sort && sort.kind === kind && sort.fieldKey === fieldKey;
@@ -407,9 +448,11 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
   }, [id]);
 
   // 탭별 최초 1회 fetch 최적화 (탭 재방문 시 불필요한 재요청 방지)
-  const hasFetchedRecordsRef = useRef(false);
   const hasFetchedScriptRef = useRef(false);
   const hasFetchedActivityRef = useRef(false);
+  // 전체 선택 모드를 fetchRecords 의존성에서 제외하기 위한 ref 미러
+  const selectAllMatchingRef = useRef(selectAllMatching);
+  useEffect(() => { selectAllMatchingRef.current = selectAllMatching; }, [selectAllMatching]);
 
   useEffect(() => { fetchSource(); }, [fetchSource]);
   useEffect(() => { setBrowserOrigin(window.location.origin); }, []);
@@ -440,11 +483,11 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
     if (!source || !workspace) return;
     if (source.workspaceId !== workspace.id) router.replace("/collect");
   }, [source, workspace, router]);
+  // records 탭: 최초 진입 시, 그리고 검색/필터/정렬/페이지 변경 시 서버 재조회.
+  // 다른 탭에 있을 땐 요청하지 않다가, 탭 복귀 시 1회 동기화.
   useEffect(() => {
-    if (tab === "records" && !hasFetchedRecordsRef.current) {
-      hasFetchedRecordsRef.current = true;
-      fetchRecords();
-    }
+    if (tab !== "records") return;
+    fetchRecords();
   }, [tab, fetchRecords]);
   useEffect(() => {
     if (tab === "script" && !hasFetchedScriptRef.current) {
@@ -536,40 +579,67 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
     }
   };
 
-  const handleExportCsvWithFilter = () => {
+  // 현재 필터 조건에 매칭되는 모든 레코드를 서버에서 페이지 단위로 모아 반환
+  const fetchAllMatchingRecords = useCallback(async (): Promise<CollectRecord[]> => {
+    const all: CollectRecord[] = [];
+    const pageLimit = 500;
+    for (let p = 1; p <= 200; p++) {
+      const qs = buildFilterQuery();
+      qs.set("page", String(p));
+      qs.set("limit", String(pageLimit));
+      const res = await fetch(`/api/collect-sources/${id}/records?${qs.toString()}`);
+      if (!res.ok) break;
+      const data = await res.json();
+      const batch: CollectRecord[] = data.records ?? [];
+      all.push(...batch);
+      if (batch.length < pageLimit || all.length >= (data.total ?? all.length)) break;
+    }
+    return all;
+  }, [id, buildFilterQuery]);
+
+  const handleExportCsvWithFilter = async () => {
+    // 필터·선택 모두 없으면 서버 전체 export (first-touch UTM 등 풍부한 컬럼 포함)
     if (!hasActiveFilter && selectedIds.size === 0) {
       window.location.href = `/api/collect-sources/${id}/records/export`;
       return;
     }
-    // 필터/선택된 결과만 클라이언트에서 CSV 생성
-    const targetRecords = selectedIds.size > 0
-      ? records.filter((r) => selectedIds.has(r.id))
-      : sortedRecords;
-    if (!source) return;
-    const csvEscape = (v: unknown) => {
-      if (v === null || v === undefined) return "";
-      const s = String(v);
-      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const headers = [
-      "시간 (KST)",
-      ...source.fieldMappings.map((f) => f.label || f.key),
-      "UTM 소스", "UTM 매체", "UTM 캠페인", "UTM 키워드", "UTM 콘텐츠", "Referrer",
-    ];
-    const rows = targetRecords.map((r) => [
-      formatKstDateTime(r.createdAt),
-      ...source.fieldMappings.map((f) => r.data?.[f.key] ?? ""),
-      r.utmSource ?? "", r.utmMedium ?? "", r.utmCampaign ?? "",
-      r.utmTerm ?? "", r.utmContent ?? "", r.referrer ?? "",
-    ]);
-    const csv = [headers, ...rows].map((row) => row.map(csvEscape).join(",")).join("\r\n");
-    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    const date = new Date().toISOString().slice(0, 10);
-    a.download = `${source.name.replace(/[^a-zA-Z0-9가-힣_-]+/g, "_")}_filtered_${date}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    if (!source || isExporting) return;
+    setIsExporting(true);
+    try {
+      // 필터 매칭 전체를 서버에서 모은 뒤, 명시적 선택이 있으면 그 ID로 좁힘
+      const matching = await fetchAllMatchingRecords();
+      const targetRecords = selectedIds.size > 0 && !selectAllMatching
+        ? matching.filter((r) => selectedIds.has(r.id))
+        : matching;
+      const csvEscape = (v: unknown) => {
+        if (v === null || v === undefined) return "";
+        const s = String(v);
+        return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const headers = [
+        "시간 (KST)",
+        ...source.fieldMappings.map((f) => f.label || f.key),
+        "UTM 소스", "UTM 매체", "UTM 캠페인", "UTM 키워드", "UTM 콘텐츠", "Referrer",
+      ];
+      const rows = targetRecords.map((r) => [
+        formatKstDateTime(r.createdAt),
+        ...source.fieldMappings.map((f) => r.data?.[f.key] ?? ""),
+        r.utmSource ?? "", r.utmMedium ?? "", r.utmCampaign ?? "",
+        r.utmTerm ?? "", r.utmContent ?? "", r.referrer ?? "",
+      ]);
+      const csv = [headers, ...rows].map((row) => row.map(csvEscape).join(",")).join("\r\n");
+      const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      const date = new Date().toISOString().slice(0, 10);
+      a.download = `${source.name.replace(/[^a-zA-Z0-9가-힣_-]+/g, "_")}_filtered_${date}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch {
+      toast.error("내보내기에 실패했어요");
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleSaveFields = async () => {
@@ -825,9 +895,9 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
             }`}
           >
             <Icon className="w-3.5 h-3.5" />{label}
-            {tabId === "records" && recordsTotal > 0 && (
+            {tabId === "records" && recordsGrandTotal > 0 && (
               <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/10 text-violet-500">
-                {recordsTotal.toLocaleString()}
+                {recordsGrandTotal.toLocaleString()}
               </span>
             )}
           </button>
@@ -844,9 +914,9 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
               <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
                 <p className="text-sm text-muted-foreground">
                   {hasActiveFilter
-                    ? <>필터 결과 <span className="text-foreground font-medium">{filteredRecords.length.toLocaleString()}</span> / {recordsTotal.toLocaleString()}건</>
-                    : <>총 {recordsTotal.toLocaleString()}건</>}
-                  {selectedIds.size > 0 && <span className="ml-2 text-violet-500">· {selectedIds.size}건 선택</span>}
+                    ? <>필터 결과 <span className="text-foreground font-medium">{recordsTotal.toLocaleString()}</span> / 전체 {recordsGrandTotal.toLocaleString()}건</>
+                    : <>총 {recordsGrandTotal.toLocaleString()}건</>}
+                  {selectedIds.size > 0 && <span className="ml-2 text-violet-500">· {selectedIds.size.toLocaleString()}건 선택</span>}
                 </p>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {selectedIds.size > 0 && (
@@ -862,11 +932,11 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                   <motion.button
                     whileHover={{ y: -1 }} whileTap={{ scale: 0.96 }} transition={spring}
                     onClick={handleExportCsv}
-                    disabled={recordsTotal === 0}
+                    disabled={recordsGrandTotal === 0 || isExporting}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium hover:bg-secondary transition-colors disabled:opacity-40"
                     title={hasActiveFilter || selectedIds.size > 0 ? "필터/선택된 결과만 내보냅니다" : "전체 데이터를 내보냅니다"}
                   >
-                    <Download className="w-3.5 h-3.5" />CSV 내보내기
+                    {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}CSV 내보내기
                   </motion.button>
                   <motion.button
                     whileTap={{ scale: 0.92 }} transition={spring}
@@ -949,7 +1019,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                           <div className="border-t border-border" />
                           <button
                             onClick={() => { setShowNormalize(true); setShowMoreMenu(false); }}
-                            disabled={recordsTotal === 0}
+                            disabled={recordsGrandTotal === 0}
                             className="flex items-center gap-2 w-full px-3 py-2.5 text-xs hover:bg-secondary transition-colors text-left disabled:opacity-40"
                           >
                             <Eraser className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
@@ -960,7 +1030,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                           </button>
                           <button
                             onClick={() => { setShowCleanup(true); setShowMoreMenu(false); }}
-                            disabled={recordsTotal === 0 || source.fieldMappings.length === 0}
+                            disabled={recordsGrandTotal === 0 || source.fieldMappings.length === 0}
                             className="flex items-center gap-2 w-full px-3 py-2.5 text-xs hover:bg-secondary transition-colors text-left disabled:opacity-40"
                           >
                             <Wand2 className="w-3.5 h-3.5 text-amber-500 shrink-0" />
@@ -988,8 +1058,8 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                 </div>
               </div>
 
-              {/* 검색/필터 바 */}
-              {records.length > 0 && (() => {
+              {/* 검색/필터 바 — 데이터가 있거나 필터가 적용된 동안 항상 표시 (0건 결과에서도 해제 가능하도록) */}
+              {(recordsGrandTotal > 0 || hasActiveFilter) && (() => {
                 const activeFilterCount = [filterDateFrom, filterDateTo, filterUtmSource, filterUtmMedium].filter(Boolean).length;
                 return (
                   <div className="mb-3">
@@ -1037,7 +1107,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                               <input
                                 type="date"
                                 value={filterDateFrom}
-                                onChange={(e) => setFilterDateFrom(e.target.value)}
+                                onChange={(e) => { setFilterDateFrom(e.target.value); resetToFirstPage(); }}
                                 className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
                               />
                             </label>
@@ -1047,14 +1117,14 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                               <input
                                 type="date"
                                 value={filterDateTo}
-                                onChange={(e) => setFilterDateTo(e.target.value)}
+                                onChange={(e) => { setFilterDateTo(e.target.value); resetToFirstPage(); }}
                                 className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
                               />
                             </label>
                             {utmSourceOptions.length > 0 && (
                               <select
                                 value={filterUtmSource}
-                                onChange={(e) => setFilterUtmSource(e.target.value)}
+                                onChange={(e) => { setFilterUtmSource(e.target.value); resetToFirstPage(); }}
                                 className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
                               >
                                 <option value="">UTM 소스 전체</option>
@@ -1064,7 +1134,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                             {utmMediumOptions.length > 0 && (
                               <select
                                 value={filterUtmMedium}
-                                onChange={(e) => setFilterUtmMedium(e.target.value)}
+                                onChange={(e) => { setFilterUtmMedium(e.target.value); resetToFirstPage(); }}
                                 className="px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
                               >
                                 <option value="">UTM 매체 전체</option>
@@ -1084,15 +1154,30 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                 );
               })()}
 
-              {/* 필터된 전체 선택 배너 */}
-              {selectedIds.size > 0 && selectedIds.size < filteredRecords.length && pagedRecords.every((r) => selectedIds.has(r.id)) && (
+              {/* 전체 결과 선택 배너 — 현재 페이지를 모두 선택했고, 페이지 밖에 더 있는 경우 */}
+              {!selectAllMatching && records.length > 0 && recordsTotal > records.length && records.every((r) => selectedIds.has(r.id)) && (
                 <div className="mb-3 px-3 py-2 rounded-lg bg-violet-500/5 border border-violet-400/30 text-xs flex items-center justify-between">
-                  <span>이 페이지의 {pagedRecords.length}건이 선택됐어요.</span>
+                  <span>이 페이지의 {records.length.toLocaleString()}건이 선택됐어요.</span>
                   <button
-                    onClick={() => setSelectedIds(new Set(filteredRecords.map((r) => r.id)))}
+                    onClick={selectAllAcrossPages}
+                    disabled={selectingAll}
+                    className="text-violet-500 font-medium hover:underline disabled:opacity-50"
+                  >
+                    {selectingAll
+                      ? "선택 중..."
+                      : hasActiveFilter ? `필터된 ${recordsTotal.toLocaleString()}건 전체 선택` : `전체 ${recordsTotal.toLocaleString()}건 선택`}
+                  </button>
+                </div>
+              )}
+              {/* 전체 결과 선택됨 안내 */}
+              {selectAllMatching && (
+                <div className="mb-3 px-3 py-2 rounded-lg bg-violet-500/10 border border-violet-400/40 text-xs flex items-center justify-between">
+                  <span>{hasActiveFilter ? `필터된 ${recordsTotal.toLocaleString()}건 전체가 선택됐어요.` : `전체 ${recordsTotal.toLocaleString()}건이 선택됐어요.`}</span>
+                  <button
+                    onClick={() => { setSelectAllMatching(false); setSelectedIds(new Set()); }}
                     className="text-violet-500 font-medium hover:underline"
                   >
-                    {hasActiveFilter ? `필터된 ${filteredRecords.length}건 전체 선택` : `전체 ${filteredRecords.length}건 선택`}
+                    선택 해제
                   </button>
                 </div>
               )}
@@ -1100,13 +1185,13 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                 <div className="flex items-center justify-center h-32">
                   <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
                 </div>
-              ) : records.length === 0 ? (
+              ) : recordsGrandTotal === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <Table2 className="w-8 h-8 text-muted-foreground/20 mb-3" />
                   <p className="text-sm text-muted-foreground">아직 수집된 데이터가 없어요</p>
                   <p className="text-xs text-muted-foreground/60 mt-1">스크립트를 설치하면 폼 제출 시 자동으로 수집돼요</p>
                 </div>
-              ) : filteredRecords.length === 0 ? (
+              ) : records.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <Filter className="w-8 h-8 text-muted-foreground/20 mb-3" />
                   <p className="text-sm text-muted-foreground">필터 조건에 맞는 데이터가 없어요</p>
@@ -1120,7 +1205,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                         <th className="px-3 py-2.5 w-10 sticky left-0 z-10 bg-secondary/50">
                           <input
                             type="checkbox"
-                            checked={pagedRecords.length > 0 && pagedRecords.every((r) => selectedIds.has(r.id))}
+                            checked={records.length > 0 && records.every((r) => selectedIds.has(r.id))}
                             onChange={toggleSelectAll}
                             className="accent-violet-500 cursor-pointer"
                             aria-label="현재 페이지 모두 선택"
@@ -1160,7 +1245,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                       </tr>
                     </thead>
                     <tbody>
-                      {pagedRecords.map((record) => (
+                      {records.map((record) => (
                         <tr
                           key={record.id}
                           onClick={() => setDetailRecordId(record.id)}
@@ -1197,14 +1282,14 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                 <div className="flex items-center justify-between gap-3 mt-3 px-1">
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <span>
-                      {(pageStart + 1).toLocaleString()}–{Math.min(pageEnd, sortedRecords.length).toLocaleString()} / {sortedRecords.length.toLocaleString()}건
+                      {recordsTotal === 0 ? 0 : (pageStart + 1).toLocaleString()}–{Math.min(pageEnd, recordsTotal).toLocaleString()} / {recordsTotal.toLocaleString()}건
                     </span>
                     <span className="text-muted-foreground/40">·</span>
                     <label className="flex items-center gap-1">
                       페이지당
                       <select
                         value={pageSize}
-                        onChange={(e) => setPageSize(parseInt(e.target.value))}
+                        onChange={(e) => { setPageSize(parseInt(e.target.value)); setPage(1); }}
                         className="px-1.5 py-0.5 rounded border border-border bg-background text-xs focus:outline-none focus:border-violet-400"
                       >
                         {[25, 50, 100, 200, 500].map((n) => <option key={n} value={n}>{n}</option>)}
@@ -1909,12 +1994,12 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
                   <div>
                     <p className="text-sm font-medium">모든 수집 레코드 삭제</p>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
-                      이 소스에 수집된 모든 데이터({recordsTotal.toLocaleString()}건)를 영구 삭제합니다. 되돌릴 수 없어요.
+                      이 소스에 수집된 모든 데이터({recordsGrandTotal.toLocaleString()}건)를 영구 삭제합니다. 되돌릴 수 없어요.
                     </p>
                   </div>
                   <button
                     onClick={() => setShowDangerDelete(true)}
-                    disabled={recordsTotal === 0}
+                    disabled={recordsGrandTotal === 0}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400 text-xs font-medium hover:bg-red-500/20 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
                   >
                     <Trash2 className="w-3.5 h-3.5" />전체 삭제
@@ -2056,7 +2141,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
           siteUrl={source.siteUrl}
           fieldMappings={source.fieldMappings}
           onClose={() => setShowTest(false)}
-          onRecordReceived={() => { fetchRecords(); }}
+          onRecordReceived={() => { fetchRecords(); fetchSource(); }}
         />
       )}
 
@@ -2064,7 +2149,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
         <DangerDeleteModal
           sourceId={id}
           sourceName={source.name}
-          recordCount={recordsTotal}
+          recordCount={recordsGrandTotal}
           onClose={() => setShowDangerDelete(false)}
           onDeleted={() => { fetchRecords(); fetchSource(); }}
         />
@@ -2074,7 +2159,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
         <GdprModal
           sourceId={id}
           onClose={() => setShowGdpr(false)}
-          onChanged={() => { fetchRecords(); }}
+          onChanged={() => { fetchRecords(); fetchSource(); }}
         />
       )}
 
@@ -2084,7 +2169,7 @@ export default function CollectDetailPage({ params }: { params: Promise<{ id: st
           recordId={detailRecordId}
           fieldMappings={source.fieldMappings}
           onClose={() => setDetailRecordId(null)}
-          onChanged={() => { fetchRecords(); }}
+          onChanged={() => { fetchRecords(); fetchSource(); }}
         />
       )}
     </div>

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@/generated/prisma";
 import { logActivity } from "@/lib/activity";
 
 async function authorize(id: string, requireAdmin = false) {
@@ -22,6 +23,29 @@ async function authorize(id: string, requireAdmin = false) {
   return { source, userId: user.id };
 }
 
+// 정렬 ORDER BY 절을 안전하게 구성. 컬럼명은 화이트리스트, JSONB 필드 키는 파라미터 바인딩.
+// kind: "createdAt" | "utmSource" | "utmMedium" | "field"(fieldKey 필요)
+function buildOrderBy(sort: string | null, dir: string | null, fieldKey: string | null): Prisma.Sql {
+  const direction = dir === "asc" ? Prisma.sql`ASC` : Prisma.sql`DESC`;
+  // 동률 시 안정 정렬을 위해 createdAt DESC 를 보조 키로
+  const tiebreak = Prisma.sql`, "createdAt" DESC`;
+  switch (sort) {
+    case "utmSource":
+      return Prisma.sql`ORDER BY COALESCE("utmSource",'') ${direction}${tiebreak}`;
+    case "utmMedium":
+      return Prisma.sql`ORDER BY COALESCE("utmMedium",'') ${direction}${tiebreak}`;
+    case "field":
+      if (fieldKey) {
+        // ->> 의 우항(키)은 파라미터 바인딩되어 SQL 인젝션 안전. 빈 값은 NULL 처리.
+        return Prisma.sql`ORDER BY NULLIF("data"->>${fieldKey}, '') ${direction} NULLS LAST${tiebreak}`;
+      }
+      return Prisma.sql`ORDER BY "createdAt" ${direction}`;
+    case "createdAt":
+    default:
+      return Prisma.sql`ORDER BY "createdAt" ${direction}`;
+  }
+}
+
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const auth = await authorize(id);
@@ -37,64 +61,54 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const utmMedium = searchParams.get("utmMedium");
   const from = searchParams.get("from");
   const to = searchParams.get("to");
+  const sort = searchParams.get("sort");
+  const dir = searchParams.get("dir");
+  const sortField = searchParams.get("sortField");
 
-  // Postgres JSONB ::text 캐스팅으로 모든 필드값에서 ILIKE 검색
-  // 큰 데이터셋에서도 일관된 응답 시간 (인덱스 활용 어렵지만 정확성 우선)
-  const where: Record<string, unknown> = { sourceId: id };
-  if (utmSource) where.utmSource = utmSource;
-  if (utmMedium) where.utmMedium = utmMedium;
-  if (from || to) {
-    const range: Record<string, Date> = {};
-    if (from) range.gte = new Date(from);
-    if (to) range.lte = new Date(to);
-    where.createdAt = range;
-  }
+  const orderBy = buildOrderBy(sort, dir, sortField);
 
-  let records, total;
+  // 필터 조건을 raw SQL 조각으로 구성 (검색 유무와 무관하게 동일 적용)
+  const conditions: Prisma.Sql[] = [Prisma.sql`"sourceId" = ${id}`];
+  if (utmSource) conditions.push(Prisma.sql`"utmSource" = ${utmSource}`);
+  if (utmMedium) conditions.push(Prisma.sql`"utmMedium" = ${utmMedium}`);
+  if (from) conditions.push(Prisma.sql`"createdAt" >= ${new Date(from)}`);
+  if (to) conditions.push(Prisma.sql`"createdAt" <= ${new Date(to)}`);
   if (q) {
-    // 검색은 raw SQL 로 JSONB 텍스트 검색 + utm 필드
+    // Postgres JSONB ::text 캐스팅으로 모든 필드값에서 ILIKE 검색
     const escaped = q.replace(/[%_\\]/g, (m) => "\\" + m);
     const pattern = `%${escaped}%`;
-    const fromDate = from ? new Date(from) : new Date(0);
-    const toDate = to ? new Date(to) : new Date();
-    const rows = await prisma.$queryRaw<Array<{ id: string }>>`
-      SELECT id FROM "CollectRecord"
-      WHERE "sourceId" = ${id}
-        AND "createdAt" >= ${fromDate}
-        AND "createdAt" <= ${toDate}
-        AND (
-          "data"::text ILIKE ${pattern}
-          OR COALESCE("utmSource",'') ILIKE ${pattern}
-          OR COALESCE("utmMedium",'') ILIKE ${pattern}
-          OR COALESCE("utmCampaign",'') ILIKE ${pattern}
-          OR COALESCE("referrer",'') ILIKE ${pattern}
-        )
-      ORDER BY "createdAt" DESC
-      LIMIT ${limit} OFFSET ${skip}
-    `;
-    const ids = rows.map((r) => r.id);
-    records = await prisma.collectRecord.findMany({ where: { id: { in: ids } }, orderBy: { createdAt: "desc" } });
-    const countRow = await prisma.$queryRaw<Array<{ count: bigint }>>`
-      SELECT COUNT(*)::bigint AS count FROM "CollectRecord"
-      WHERE "sourceId" = ${id}
-        AND "createdAt" >= ${fromDate}
-        AND "createdAt" <= ${toDate}
-        AND (
-          "data"::text ILIKE ${pattern}
-          OR COALESCE("utmSource",'') ILIKE ${pattern}
-          OR COALESCE("utmMedium",'') ILIKE ${pattern}
-          OR COALESCE("utmCampaign",'') ILIKE ${pattern}
-          OR COALESCE("referrer",'') ILIKE ${pattern}
-        )
-    `;
-    total = Number(countRow[0]?.count ?? 0);
-  } else {
-    const [r, t] = await prisma.$transaction([
-      prisma.collectRecord.findMany({ where, orderBy: { createdAt: "desc" }, skip, take: limit }),
-      prisma.collectRecord.count({ where }),
-    ]);
-    records = r;
-    total = t;
+    conditions.push(Prisma.sql`(
+      "data"::text ILIKE ${pattern}
+      OR COALESCE("utmSource",'') ILIKE ${pattern}
+      OR COALESCE("utmMedium",'') ILIKE ${pattern}
+      OR COALESCE("utmCampaign",'') ILIKE ${pattern}
+      OR COALESCE("referrer",'') ILIKE ${pattern}
+    )`);
+  }
+  const whereClause = Prisma.join(conditions, " AND ");
+
+  // 1) 정렬·페이지네이션된 ID 목록을 raw SQL 로 조회 (JSONB 필드 정렬 지원)
+  const idRows = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT id FROM "CollectRecord"
+    WHERE ${whereClause}
+    ${orderBy}
+    LIMIT ${limit} OFFSET ${skip}
+  `);
+  const ids = idRows.map((r) => r.id);
+
+  // 2) 전체 카운트
+  const countRows = await prisma.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
+    SELECT COUNT(*)::bigint AS count FROM "CollectRecord"
+    WHERE ${whereClause}
+  `);
+  const total = Number(countRows[0]?.count ?? 0);
+
+  // 3) 레코드 본문 조회 후 raw SQL 정렬 순서대로 재정렬 (findMany 는 순서 보장 안 함)
+  let records: Awaited<ReturnType<typeof prisma.collectRecord.findMany>> = [];
+  if (ids.length > 0) {
+    const fetched = await prisma.collectRecord.findMany({ where: { id: { in: ids } } });
+    const byId = new Map(fetched.map((r) => [r.id, r]));
+    records = ids.map((rid) => byId.get(rid)!).filter(Boolean);
   }
 
   return NextResponse.json({ records, total, page, limit, q });

@@ -70,8 +70,9 @@ interface ImportResult {
   error?: string;
 }
 
-// Vercel 요청 본문 4.5MB 한도 회피 — 레코드 1건당 수백 바이트라 1500건이면 ~1MB 내외.
-const IMPORT_BATCH_SIZE = 1500;
+// Vercel 요청 본문 4.5MB 한도 회피. 실측: 1행 평균 ~960바이트(긴 한글 텍스트 포함).
+// 4000건 ≈ 3.7MB로 한도 내 여유 확보 (5000건은 4.57MB로 초과).
+const IMPORT_BATCH_SIZE = 4000;
 
 function normalize(s: string) {
   return s.trim().toLowerCase().replace(/\s+/g, "").replace(/[_\-/().]/g, "");

@@ -128,6 +128,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     init().finally(() => setIsLoading(false));
   }, []);
 
+  // 마지막 활동 시각 갱신 — 하루 1회만 (localStorage throttle). 세션 유지 사용자의
+  // 실제 접속을 추적하기 위함 (last_sign_in_at은 명시적 로그인만 갱신됨).
+  useEffect(() => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      if (localStorage.getItem("mach_heartbeat") !== today) {
+        fetch("/api/heartbeat", { method: "POST" })
+          .then((r) => { if (r.ok) localStorage.setItem("mach_heartbeat", today); })
+          .catch(() => {});
+      }
+    } catch {}
+  }, []);
+
   return (
     <WorkspaceContext.Provider value={{
       workspace, workspaces, projects, currentProject,

@@ -477,6 +477,7 @@ export default async function SuperAdminPage({ searchParams }: { searchParams?: 
         email: true,
         name: true,
         isSuperAdmin: true,
+        lastActiveAt: true,
         createdAt: true,
         memberships: {
           orderBy: { joinedAt: "asc" },
@@ -770,7 +771,14 @@ export default async function SuperAdminPage({ searchParams }: { searchParams?: 
 
                     const authInfo = authUserMap.get(adminUser.id);
                     const lastSignIn = authInfo?.lastSignInAt;
-                    const isRecentlyActive = lastSignIn && (Date.now() - new Date(lastSignIn).getTime()) < 7 * 24 * 60 * 60_000;
+                    // 마지막 접속 우선순위: lastActiveAt(자체 추적, 가장 정확)
+                    //   → 최근 ActivityLog(액션 기록) → last_sign_in_at(명시적 로그인만)
+                    const lastActivityLog = adminUser.activityLogs?.[0]?.createdAt ?? null;
+                    const lastSeenCandidates = [adminUser.lastActiveAt, lastActivityLog, lastSignIn]
+                      .filter(Boolean)
+                      .map((d) => new Date(d as string | Date).getTime());
+                    const lastSeen = lastSeenCandidates.length > 0 ? new Date(Math.max(...lastSeenCandidates)) : null;
+                    const isRecentlyActive = lastSeen && (Date.now() - lastSeen.getTime()) < 7 * 24 * 60 * 60_000;
 
                     return (
                       <article key={adminUser.id} className="border-t border-border py-4">
@@ -787,8 +795,8 @@ export default async function SuperAdminPage({ searchParams }: { searchParams?: 
                             <p className="mt-1 truncate text-xs text-muted-foreground">{adminUser.email}</p>
                             <p className="mt-2 text-xs text-muted-foreground">
                               가입 {formatKstDateTime(adminUser.createdAt)}
-                              {lastSignIn
-                                ? ` · 마지막 접속 ${formatKstDateTime(new Date(lastSignIn))}`
+                              {lastSeen
+                                ? ` · 마지막 접속 ${formatKstDateTime(lastSeen)}`
                                 : " · 접속 기록 없음"}
                             </p>
                             {firstOwnedWorkspace && (

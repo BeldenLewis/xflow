@@ -49,7 +49,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "잘못된 요청" }, { status: 400, headers: PREFLIGHT_HEADERS });
   }
 
-  const apiKey = request.headers.get("x-api-key") ?? (body.apiKey as string);
+  const url = new URL(request.url);
+  const apiKey =
+    request.headers.get("x-api-key") ?? url.searchParams.get("k") ?? (body.apiKey as string);
   if (!apiKey) {
     return NextResponse.json({ error: "API 키 필요" }, { status: 401, headers: PREFLIGHT_HEADERS });
   }

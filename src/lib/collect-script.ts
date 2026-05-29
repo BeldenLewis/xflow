@@ -500,26 +500,59 @@ ${utmCore}
   if (isFormPage()) {
     var triggered = false;
     var pendingData = null;
+    var pendingAt = 0;
+    var sentFingerprints = {};
 
+    // 같은 데이터 중복 전송 방지용 지문 (5초 윈도우)
+    function fingerprint(data) {
+      try { return JSON.stringify(data); } catch (e) { return String(Date.now()); }
+    }
+
+    function capture() {
+      var d = collectData();
+      // 의미있는 값이 하나라도 있으면 캡처
+      var hasValue = false;
+      for (var k in d) { if (d[k] && String(d[k]).trim() !== "") { hasValue = true; break; } }
+      if (hasValue) {
+        pendingData = d;
+        pendingAt = Date.now();
+      }
+      return hasValue;
+    }
+
+    function doSend(data, opts) {
+      if (!data) return;
+      var fp = fingerprint(data);
+      var now = Date.now();
+      // 5초 내 같은 지문은 중복으로 간주, skip
+      if (sentFingerprints[fp] && (now - sentFingerprints[fp]) < 5000) return;
+      sentFingerprints[fp] = now;
+      sendData(data);
+    }
+
+    // 제출 버튼 클릭 → 데이터 캡처
     document.addEventListener("click", function(e) {
-      if (triggered) return;
       var target = e.target;
       var btn = target.closest
         ? target.closest("button, input[type='submit'], a")
         : null;
       if (!btn) return;
       var text = (btn.innerText || btn.value || "").trim();
-      var isSubmit = btn.type === "submit" || text === "확인" || text === "OK"
-        || text === "접수" || text === "제출" || text === "신청";
-      if (isSubmit) {
-        pendingData = collectData();
-      }
+      var isSubmit = btn.type === "submit"
+        || /확인|접수|제출|신청|등록|보내기|완료|submit|apply|register|send/i.test(text);
+      if (isSubmit) capture();
     }, true);
 
+    // native form submit 이벤트 → 데이터 캡처 (버튼 텍스트 매칭 실패 대비)
+    document.addEventListener("submit", function() { capture(); }, true);
+
+    // 성공 트리거 텍스트 감지 → 전송 (primary)
     var fire = function() {
       if (triggered) return;
       triggered = true;
-      sendData(pendingData || collectData());
+      doSend(pendingData || collectData());
+      // 재무장 — 같은 페이지에서 추가 제출 가능하도록 3초 후 리셋
+      setTimeout(function() { triggered = false; pendingData = null; }, 3000);
       if (REDIRECT_URL) {
         setTimeout(function() { window.location.href = REDIRECT_URL; }, 1000);
       }
@@ -528,12 +561,47 @@ ${utmCore}
     var observer = new MutationObserver(function() {
       if (triggered) return;
       var bodyText = document.body.innerText || document.body.textContent || "";
-      if (bodyText.indexOf(SUCCESS_TRIGGER) !== -1) {
+      if (SUCCESS_TRIGGER && bodyText.indexOf(SUCCESS_TRIGGER) !== -1) {
         fire();
       }
     });
-
     observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
+
+    // 페이지 이탈 fallback — 제출 데이터는 캡처됐는데 아직 전송 안 됐고,
+    // 캡처된지 60초 이내면 (= 방금 제출하고 thank-you로 넘어가는 중) sendBeacon으로 전송.
+    function flushOnLeave() {
+      if (!pendingData) return;
+      if (Date.now() - pendingAt > 60000) return; // 오래된 캡처는 무시
+      var fp = fingerprint(pendingData);
+      if (sentFingerprints[fp] && (Date.now() - sentFingerprints[fp]) < 5000) return;
+      sentFingerprints[fp] = Date.now();
+      try {
+        var ctx = getUtmContext();
+        var last = ctx.last, first = ctx.first;
+        var payload = JSON.stringify({
+          data: pendingData,
+          _fieldMeta: getFieldMeta(),
+          utmSource: last.utmSource, utmMedium: last.utmMedium, utmCampaign: last.utmCampaign,
+          utmTerm: last.utmTerm, utmContent: last.utmContent, utmId: last.utmId || "",
+          firstUtmSource: first.utmSource, firstUtmMedium: first.utmMedium, firstUtmCampaign: first.utmCampaign,
+          firstUtmTerm: first.utmTerm, firstUtmContent: first.utmContent, firstUtmId: first.utmId || "",
+          firstReferrer: first.referrer || "", firstSeenAt: first.seenAt || "",
+          journey: ctx.journey, referrer: document.referrer, userAgent: navigator.userAgent
+        });
+        // sendBeacon은 헤더 커스텀 불가 → x-api-key 못 보냄. URL 쿼리로 키 전달.
+        var beaconUrl = COLLECT_URL + (COLLECT_URL.indexOf("?") === -1 ? "?" : "&") + "k=" + encodeURIComponent(API_KEY);
+        var blob = new Blob([payload], { type: "application/json" });
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon(beaconUrl, blob);
+        } else {
+          fetch(beaconUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload, keepalive: true }).catch(function(){});
+        }
+      } catch (e) {}
+    }
+    document.addEventListener("visibilitychange", function() {
+      if (document.visibilityState === "hidden") flushOnLeave();
+    }, true);
+    window.addEventListener("pagehide", flushOnLeave, true);
   }
 })();`;
 
